@@ -965,14 +965,17 @@ window.addEventListener('offline', updateNetStatus);
 
 function posGps(id) { 
     if (navigator.geolocation) {
-        var domPos = document.getElementById('gpsBtn');
+        var domPosLon = document.getElementById('gpslongitud');
+        var domPosLat = document.getElementById('gpslatitud');
         navigator.geolocation.getCurrentPosition(
             (position) => {
-                var txt = "Latitud: " + position.coords.latitude + "\nLongitud: " + position.coords.longitude;
-                domPos.innerHTML = txt;
+                //var txt = "Latitud: " + position.coords.latitude + "\nLongitud: " + position.coords.longitude;
+                domPosLon.innerHTML = position.coords.longitude;
+                domPosLat.innerHTML = position.coords.latitude;
             },
             (error) => {
-                domPos.innerHTML = "Error al obtener la ubicación: " + error.message
+                domPosLon.innerHTML = "Error al obtener la ubicación: " + error.message;
+                domPosLat.innerHTML = "Error al obtener la ubicación: " + error.message;
                 //console.error("Error al obtener la ubicación: " + error.message);
                 },
             {
