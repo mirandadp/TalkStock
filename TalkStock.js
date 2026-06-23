@@ -938,7 +938,8 @@ function setAdminTab(tab) {
     if (tab === 'sync') renderSyncScreen(); else if (tab !== 'mat') renderAdmin();
 }
 function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
-    document.getElementById('confirmTitle').textContent = title; document.getElementById('confirmBody').innerHTML = body;
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmBody').innerHTML = body;
     document.getElementById('confirmBtn').textContent = confirmLabel;
     document.getElementById('confirmBtn').onclick = () => { closeModal('confirmModal'); onConfirm(); };
     document.getElementById('confirmModal').classList.add('open');
@@ -961,3 +962,26 @@ window.addEventListener('offline', updateNetStatus);
     await initDB(); initVoice(); await initLogin();
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
 })();
+
+function posGps(id) { 
+    if (navigator.geolocation) {
+        var domPos = document.getElementById('gpsBtn');
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                var txt = "Latitud: " + position.coords.latitude + "\nLongitud: " + position.coords.longitude;
+                domPos.innerHTML = txt;
+            },
+            (error) => {
+                domPos.innerHTML = "Error al obtener la ubicación: " + error.message
+                //console.error("Error al obtener la ubicación: " + error.message);
+                },
+            {
+                enableHighAccuracy: true, // Prioriza el uso del GPS
+                timeout: 5000,            // Tiempo máximo de espera
+                maximumAge: 0             // No usar datos cacheados
+            }
+        );
+    } else {
+        console.error("Geolocalización no soportada por este navegador.");
+    }
+}
