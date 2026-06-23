@@ -48,7 +48,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .voice-hero{text-align:center;margin-bottom:20px;}
 .voice-hero h2{font-size:20px;font-weight:700;margin-bottom:4px;}
 .voice-hero p{font-size:12px;color:var(--text2);}
-.mic-btn{width:100px;height:100px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;transition:all .2s;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 4px 24px rgba(79,142,247,.35);}
+.mic-btn{padding:5px;width:100px;height:100px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;transition:all .2s;background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 4px 24px rgba(79,142,247,.35);}
 .mic-btn:active{transform:scale(.95);}
 .mic-btn.recording{animation:pulse 1s infinite;background:linear-gradient(135deg,var(--danger),#c0392b);}
 @keyframes pulse{0%,100%{box-shadow:0 4px 24px rgba(231,76,60,.4)}50%{box-shadow:0 4px 40px rgba(231,76,60,.8),0 0 0 10px rgba(231,76,60,.1)}}
