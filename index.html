@@ -13,11 +13,11 @@
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
 #app{display:flex;flex-direction:column;height:100%;}
 /* LOGIN */
-#login-screen{position:fixed;inset:0;background:var(--bg);z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;}
+#login-screen{position:fixed;inset:0;background:var(--bg);z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;overflow-y:auto;}
 #login-screen.hidden{display:none;}
 .login-logo{font-size:52px;margin-bottom:8px;}
 .login-title{font-size:26px;font-weight:800;color:var(--accent);margin-bottom:4px;}
-.login-sub{font-size:13px;color:var(--text2);margin-bottom:32px;}
+.login-sub{font-size:13px;color:var(--text2);margin-bottom:28px;}
 .login-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:100%;max-width:360px;}
 .login-card h2{font-size:16px;font-weight:700;margin-bottom:16px;}
 .fg{margin-bottom:12px;}
@@ -28,7 +28,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .pin-dot{width:14px;height:14px;border-radius:50%;background:var(--border);transition:background .15s;}
 .pin-dot.filled{background:var(--accent);}
 .pin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
-.pin-key{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:16px;font-size:20px;font-weight:700;border:none;color:var(--text);cursor:pointer;transition:all .1s;}
+.pin-key{background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:16px;font-size:20px;font-weight:700;color:var(--text);cursor:pointer;transition:all .1s;}
 .pin-key:active{background:var(--accent);color:#fff;transform:scale(.95);}
 .pin-key.del{font-size:14px;color:var(--text2);}
 .role-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
@@ -45,13 +45,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .status{font-size:10px;padding:3px 7px;border-radius:20px;font-weight:600;}
 .online{background:rgba(46,204,113,.15);color:var(--success);}
 .offline{background:rgba(231,76,60,.15);color:var(--danger);}
-/* CONTENT */
 #content{flex:1;overflow-y:auto;overflow-x:hidden;}
 #navbar{background:var(--bg2);border-top:1px solid var(--border);display:flex;flex-shrink:0;}
 .nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 2px;border:none;background:none;color:var(--text3);cursor:pointer;transition:color .2s;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;}
 .nav-btn svg{width:20px;height:20px;}
 .nav-btn.active{color:var(--accent);}
-.nav-btn.hidden-nav{display:none;}
 .screen{display:none;padding:16px;animation:fadeIn .2s;}
 .screen.active{display:block;}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
@@ -89,61 +87,79 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .btn-danger{background:var(--danger);color:#fff;}
 .btn-success{background:var(--success);color:#fff;}
 .btn-warn{background:var(--warn);color:#000;}
+.btn-edit{background:rgba(79,142,247,.12);color:var(--accent);border:1px solid rgba(79,142,247,.3);}
 .btn:active{transform:scale(.98);}
 .btn-row{display:flex;gap:8px;width:100%;}
 .btn-row .btn{margin-bottom:0;}
+.btn-icon{padding:6px 10px;font-size:12px;border-radius:6px;border:none;cursor:pointer;font-weight:600;transition:all .15s;margin-left:4px;}
+.btn-icon:active{transform:scale(.95);}
 /* FORMS */
 .section-title{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px;}
 .section-title:first-child{margin-top:0;}
 .form-group{margin-bottom:10px;}
 .form-group label{display:block;font-size:12px;color:var(--text2);margin-bottom:4px;font-weight:500;}
 .form-group input,.form-group select,.form-group textarea{width:100%;background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:10px 12px;color:var(--text);font-size:13px;outline:none;font-family:inherit;}
-.form-group input:focus,.form-group select:focus{border-color:var(--accent);}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--accent);}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.form-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
 /* CARDS */
-.item-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:13px;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center;}
+.item-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:13px;margin-bottom:9px;}
+.item-card-row{display:flex;justify-content:space-between;align-items:flex-start;}
 .item-info h3{font-size:14px;font-weight:600;margin-bottom:2px;}
-.item-info p{font-size:11px;color:var(--text2);}
-.item-stock{text-align:right;}
+.item-info .meta{font-size:11px;color:var(--text2);}
+.item-info .audit{font-size:10px;color:var(--text3);margin-top:3px;}
+.item-stock{text-align:right;flex-shrink:0;margin-left:10px;}
 .item-stock .qty{font-size:20px;font-weight:700;color:var(--accent);}
 .item-stock .unit{font-size:10px;color:var(--text3);}
 .stock-low{color:var(--warn)!important;}
 .stock-zero{color:var(--danger)!important;}
 .price-tag{font-size:11px;color:var(--gold);font-weight:600;margin-top:2px;}
+.card-actions{display:flex;gap:5px;margin-top:10px;border-top:1px solid var(--border);padding-top:8px;}
+.card-actions .btn{margin-bottom:0;padding:7px 10px;font-size:11px;}
 /* MOVIMIENTOS */
-.mov-item{background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:11px 13px;margin-bottom:7px;display:flex;align-items:center;gap:10px;}
-.mov-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;}
+.mov-item{background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:11px 13px;margin-bottom:7px;display:flex;align-items:flex-start;gap:10px;}
+.mov-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;margin-top:2px;}
 .mov-in{background:rgba(46,204,113,.15);}
 .mov-out{background:rgba(231,76,60,.15);}
 .mov-info{flex:1;}
-.mov-info h4{font-size:13px;font-weight:600;margin-bottom:1px;}
-.mov-info p{font-size:11px;color:var(--text2);}
-.mov-qty{text-align:right;font-weight:700;font-size:14px;}
+.mov-info h4{font-size:13px;font-weight:600;margin-bottom:2px;}
+.mov-info p{font-size:11px;color:var(--text2);line-height:1.5;}
+.mov-qty{font-weight:700;font-size:14px;flex-shrink:0;}
 .mov-qty.in{color:var(--success);}
 .mov-qty.out{color:var(--danger);}
 /* PEDIDOS */
 .pedido-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;}
-.pedido-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
+.pedido-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;}
 .pedido-header h3{font-size:14px;font-weight:700;}
-.pedido-status{font-size:10px;padding:3px 8px;border-radius:20px;font-weight:700;text-transform:uppercase;}
+.pedido-status{font-size:10px;padding:3px 8px;border-radius:20px;font-weight:700;text-transform:uppercase;flex-shrink:0;margin-left:8px;}
 .ps-pendiente{background:rgba(243,156,18,.15);color:var(--warn);}
 .ps-aprobado{background:rgba(79,142,247,.15);color:var(--accent);}
 .ps-recibido{background:rgba(46,204,113,.15);color:var(--success);}
 .ps-cancelado{background:rgba(231,76,60,.15);color:var(--danger);}
-.pedido-meta{font-size:11px;color:var(--text2);margin-bottom:8px;}
+.pedido-meta{font-size:11px;color:var(--text2);margin-bottom:8px;line-height:1.6;}
 .pedido-items{border-top:1px solid var(--border);padding-top:8px;}
-.pedido-item-row{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--text2);}
-.pedido-item-row span:last-child{font-weight:600;color:var(--text);}
+.pedido-item-row{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;}
+.pedido-item-row span:first-child{color:var(--text2);}
+.pedido-item-row span:last-child{font-weight:600;}
 .pedido-total{display:flex;justify-content:space-between;font-size:13px;font-weight:700;border-top:1px solid var(--border);margin-top:6px;padding-top:6px;}
 .pedido-total span:last-child{color:var(--gold);}
-.pedido-actions{display:flex;gap:6px;margin-top:10px;}
-.pedido-actions .btn{font-size:11px;padding:7px 10px;margin-bottom:0;}
+.pedido-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+.pedido-actions .btn{font-size:11px;padding:7px 10px;margin-bottom:0;flex:1;min-width:80px;}
 /* USUARIOS */
-.user-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:13px;margin-bottom:8px;display:flex;align-items:center;gap:12px;}
+.user-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:13px;margin-bottom:8px;}
+.user-card-row{display:flex;align-items:center;gap:12px;}
 .user-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0;}
 .user-info{flex:1;}
 .user-info h3{font-size:14px;font-weight:600;margin-bottom:3px;}
-.user-info p{font-size:11px;color:var(--text2);}
+.user-info .audit{font-size:10px;color:var(--text3);margin-top:3px;}
+/* UBICACIONES */
+.ubic-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:13px;margin-bottom:8px;}
+.ubic-card-row{display:flex;align-items:flex-start;gap:10px;}
+.ubic-icon{width:36px;height:36px;border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;background:rgba(79,142,247,.1);}
+.ubic-info{flex:1;}
+.ubic-info h3{font-size:14px;font-weight:600;margin-bottom:2px;}
+.ubic-info .desc{font-size:12px;color:var(--text2);margin-top:3px;line-height:1.5;}
+.ubic-info .audit{font-size:10px;color:var(--text3);margin-top:4px;}
 /* STATS */
 .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}
 .stat-card{background:var(--card);border-radius:var(--rs);padding:12px;border:1px solid var(--border);}
@@ -161,7 +177,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* MODAL */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;align-items:flex-end;justify-content:center;}
 .modal-overlay.open{display:flex;}
-.modal{background:var(--bg2);border-radius:20px 20px 0 0;padding:20px 16px 36px;width:100%;max-height:88vh;overflow-y:auto;border-top:1px solid var(--border);}
+.modal{background:var(--bg2);border-radius:20px 20px 0 0;padding:20px 16px 36px;width:100%;max-height:90vh;overflow-y:auto;border-top:1px solid var(--border);}
 .modal h2{font-size:16px;font-weight:700;margin-bottom:14px;}
 .modal-close{float:right;background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;margin-top:-4px;}
 /* TOAST */
@@ -180,18 +196,18 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .sb-ok p:first-child{font-size:13px;font-weight:600;color:var(--success);margin-bottom:3px;}
 .sb-ok p{font-size:11px;color:var(--text2);word-break:break-all;}
 .setup-steps{background:var(--card);border-radius:var(--rs);padding:10px;margin-bottom:10px;font-size:12px;color:var(--text2);line-height:2;}
-.perm-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px;}
+.perm-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:12px;}
 .perm-row:last-child{border-bottom:none;}
-.perm-row span{color:var(--text2);}
-.perm-check{font-size:16px;}
+.perm-row span:first-child{color:var(--text2);}
 .lock-overlay{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;text-align:center;}
 .lock-overlay svg{opacity:.3;margin-bottom:12px;}
 .lock-overlay p{font-size:14px;color:var(--text2);}
+.divider{height:1px;background:var(--border);margin:14px 0;}
 </style>
 </head>
 <body>
 
-<!-- LOGIN SCREEN -->
+<!-- LOGIN -->
 <div id="login-screen">
   <div class="login-logo">📦</div>
   <div class="login-title">StockVoz</div>
@@ -211,17 +227,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
         <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
       </div>
       <div class="pin-grid">
-        <button class="pin-key" onclick="pinPress('1')">1</button>
-        <button class="pin-key" onclick="pinPress('2')">2</button>
-        <button class="pin-key" onclick="pinPress('3')">3</button>
-        <button class="pin-key" onclick="pinPress('4')">4</button>
-        <button class="pin-key" onclick="pinPress('5')">5</button>
-        <button class="pin-key" onclick="pinPress('6')">6</button>
-        <button class="pin-key" onclick="pinPress('7')">7</button>
-        <button class="pin-key" onclick="pinPress('8')">8</button>
-        <button class="pin-key" onclick="pinPress('9')">9</button>
-        <button class="pin-key" onclick="pinPress('0')" style="grid-column:2">0</button>
-        <button class="pin-key del" onclick="pinDel()">⌫</button>
+        <button class="pin-key" onclick="pinPress('1')">1</button><button class="pin-key" onclick="pinPress('2')">2</button><button class="pin-key" onclick="pinPress('3')">3</button>
+        <button class="pin-key" onclick="pinPress('4')">4</button><button class="pin-key" onclick="pinPress('5')">5</button><button class="pin-key" onclick="pinPress('6')">6</button>
+        <button class="pin-key" onclick="pinPress('7')">7</button><button class="pin-key" onclick="pinPress('8')">8</button><button class="pin-key" onclick="pinPress('9')">9</button>
+        <button class="pin-key" onclick="pinPress('0')" style="grid-column:2">0</button><button class="pin-key del" onclick="pinDel()">⌫</button>
       </div>
       <button class="btn btn-secondary" onclick="backToUserSelect()" style="font-size:12px;">← Cambiar usuario</button>
     </div>
@@ -305,7 +314,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
       </div>
     </div>
 
-    <!-- ADMIN PANEL -->
+    <!-- ADMIN -->
     <div id="screen-admin" class="screen">
       <div id="lock-admin" class="lock-overlay" style="display:none;">
         <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -326,6 +335,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
           <button class="tab" onclick="setAdminTab('export')">CSV</button>
         </div>
 
+        <!-- MATERIALES -->
         <div id="admin-mat">
           <p class="section-title">Añadir Material</p>
           <div class="form-group"><label>Nombre</label><input type="text" id="matNombre" placeholder="Ej: Tornillo M8"></div>
@@ -334,16 +344,21 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
             <div class="form-group"><label>Unidad</label><input type="text" id="matUnit" placeholder="ud, m, kg..."></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>Precio unitario (€)</label><input type="number" id="matPrecio" value="0" min="0" step="0.01" placeholder="0.00"></div>
+            <div class="form-group"><label>Precio unitario (€)</label><input type="number" id="matPrecio" value="0" min="0" step="0.01"></div>
             <div class="form-group"><label>Stock mínimo</label><input type="number" id="matMin" value="0" min="0"></div>
           </div>
-          <div class="form-group"><label>Proveedor</label><input type="text" id="matProveedor" placeholder="Nombre del proveedor"></div>
+          <div class="form-row">
+            <div class="form-group"><label>Proveedor</label><input type="text" id="matProveedor" placeholder="Proveedor"></div>
+            <div class="form-group"><label>Referencia</label><input type="text" id="matRef" placeholder="Ref. proveedor"></div>
+          </div>
           <div class="form-group"><label>Ubicación</label><select id="matUbic"><option value="">Sin ubicación</option></select></div>
+          <div class="form-group"><label>Descripción / Notas</label><textarea id="matDesc" rows="2" placeholder="Características, notas..." style="resize:none;"></textarea></div>
           <button class="btn btn-primary" onclick="addMaterial()">+ Añadir Material</button>
-          <p class="section-title">Materiales</p>
+          <p class="section-title">Materiales registrados</p>
           <div id="matList"></div>
         </div>
 
+        <!-- UBICACIONES -->
         <div id="admin-ubic" style="display:none;">
           <p class="section-title">Añadir Ubicación</p>
           <div class="form-row">
@@ -357,6 +372,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
               </select>
             </div>
           </div>
+          <div class="form-group"><label>Dirección / Matrícula</label><input type="text" id="ubicDireccion" placeholder="Calle, número o matrícula"></div>
+          <div class="form-group"><label>Descripción</label><textarea id="ubicDesc" rows="2" placeholder="Detalles, acceso, notas..." style="resize:none;"></textarea></div>
           <button class="btn btn-primary" onclick="addUbicacion()">+ Añadir Ubicación</button>
           <p class="section-title">Ubicaciones</p>
           <div id="ubicList"></div>
@@ -365,25 +382,22 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
         <!-- USUARIOS -->
         <div id="admin-users" style="display:none;">
           <p class="section-title">Añadir Usuario</p>
-          <div class="form-group"><label>Nombre</label><input type="text" id="newUserNombre" placeholder="Nombre completo"></div>
           <div class="form-row">
-            <div class="form-group"><label>Rol</label>
-              <select id="newUserRol">
-                <option value="operario">Operario</option>
-                <option value="encargado">Encargado</option>
-                <option value="admin">Administrador</option>
-              </select>
-            </div>
+            <div class="form-group"><label>Nombre</label><input type="text" id="newUserNombre" placeholder="Nombre completo"></div>
             <div class="form-group"><label>PIN (4 dígitos)</label><input type="password" id="newUserPin" maxlength="4" placeholder="1234" inputmode="numeric"></div>
+          </div>
+          <div class="form-group"><label>Rol</label>
+            <select id="newUserRol">
+              <option value="operario">👷 Operario</option>
+              <option value="encargado">🔑 Encargado</option>
+              <option value="admin">👑 Administrador</option>
+            </select>
           </div>
           <div style="background:var(--bg3);border-radius:var(--rs);padding:10px;margin-bottom:10px;">
             <p style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:6px;">Permisos por rol</p>
-            <div class="perm-row"><span>🔊 Control por voz / Stock</span><span style="font-size:11px;color:var(--success);">Todos</span></div>
-            <div class="perm-row"><span>📋 Ver movimientos</span><span style="font-size:11px;color:var(--success);">Todos</span></div>
-            <div class="perm-row"><span>🛒 Ver y crear pedidos</span><span style="font-size:11px;color:var(--accent);">Encargado + Admin</span></div>
-            <div class="perm-row"><span>💶 Ver precios de material</span><span style="font-size:11px;color:var(--accent);">Encargado + Admin</span></div>
-            <div class="perm-row"><span>✅ Aprobar pedidos</span><span style="font-size:11px;color:var(--gold);">Solo Admin</span></div>
-            <div class="perm-row"><span>⚙️ Gestión completa</span><span style="font-size:11px;color:var(--gold);">Solo Admin</span></div>
+            <div class="perm-row"><span>🔊 Voz · Stock · Movimientos</span><span style="color:var(--success);font-size:11px;">Todos</span></div>
+            <div class="perm-row"><span>🛒 Pedidos · 💶 Precios</span><span style="color:var(--accent);font-size:11px;">Encargado+</span></div>
+            <div class="perm-row"><span>✅ Aprobar pedidos · ⚙️ Admin</span><span style="color:var(--gold);font-size:11px;">Solo Admin</span></div>
           </div>
           <button class="btn btn-primary" onclick="addUser()">+ Añadir Usuario</button>
           <p class="section-title">Usuarios del sistema</p>
@@ -392,27 +406,16 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 
         <!-- SYNC -->
         <div id="admin-sync" style="display:none;">
-          <div class="sb-info">
-            <p>☁️ Sincronización Supabase</p>
-            <p>Gratuito y permanente. Los datos se sincronizan en tiempo real entre todos los dispositivos.</p>
-          </div>
+          <div class="sb-info"><p>☁️ Sincronización Supabase</p><p>Gratuito y permanente. Los datos se sincronizan en tiempo real entre todos los dispositivos.</p></div>
           <div id="sb-connected" style="display:none;">
-            <div class="sb-ok">
-              <p>✓ Conectado a Supabase</p>
-              <p id="sb-url-show"></p>
-              <p id="rt-status" style="color:var(--text3);margin-top:3px;">🔄 Iniciando tiempo real...</p>
-            </div>
+            <div class="sb-ok"><p>✓ Conectado a Supabase</p><p id="sb-url-show"></p><p id="rt-status" style="color:var(--text3);margin-top:3px;">🔄 Iniciando...</p></div>
             <button class="btn btn-primary" onclick="syncNow()" style="margin-bottom:7px;">🔄 Sincronizar ahora</button>
             <button class="btn btn-secondary" onclick="pullRemoteData()" style="margin-bottom:7px;">⬇️ Forzar descarga</button>
             <button class="btn btn-danger" onclick="clearSupabaseConfig()">🔌 Desconectar</button>
           </div>
           <div id="sb-form">
-            <p class="section-title">Paso 1 — Crear proyecto</p>
-            <div class="setup-steps">
-              1. <strong style="color:var(--accent)">supabase.com</strong> → New Project (gratis)<br>
-              2. Settings → API → copia URL y anon key<br>
-              3. SQL Editor → pega el SQL → Run
-            </div>
+            <p class="section-title">Paso 1 — Proyecto Supabase</p>
+            <div class="setup-steps">1. <strong style="color:var(--accent)">supabase.com</strong> → New Project (gratis)<br>2. Settings → API → copia URL y anon key<br>3. SQL Editor → pega el SQL → Run</div>
             <button class="btn btn-secondary" onclick="copySetupSQL()" style="margin-bottom:14px;">📋 Copiar SQL de configuración</button>
             <p class="section-title">Paso 2 — Credenciales</p>
             <div class="form-group"><label>Project URL</label><input type="url" id="sb-url" placeholder="https://xxxx.supabase.co"></div>
@@ -421,12 +424,15 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
           </div>
         </div>
 
+        <!-- EXPORT -->
         <div id="admin-export" style="display:none;">
           <p class="section-title">Exportar Datos</p>
           <button class="btn btn-primary" onclick="exportCSV('inventario')">📊 Inventario CSV</button>
+          <button class="btn btn-secondary" onclick="exportCSV('ubicaciones')">📍 Ubicaciones CSV</button>
           <button class="btn btn-secondary" onclick="exportCSV('movimientos')">📋 Movimientos CSV</button>
           <button class="btn btn-secondary" onclick="exportCSV('pedidos')">🛒 Pedidos CSV</button>
           <button class="btn btn-secondary" onclick="exportCSV('todo')">📦 Todo CSV</button>
+          <div class="divider"></div>
           <p class="section-title">Herramientas</p>
           <button class="btn btn-secondary" onclick="loadSampleData()">🔧 Cargar datos de ejemplo</button>
           <button class="btn btn-danger" style="margin-top:6px;" onclick="clearAllData()">⚠️ Borrar todos los datos</button>
@@ -469,11 +475,24 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
   </div>
 </div>
 
+<!-- Modal edición genérica -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('editModal')">✕</button>
+    <h2 id="editModalTitle">Editar</h2>
+    <div id="editModalBody"></div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn btn-secondary" onclick="closeModal('editModal')">Cancelar</button>
+      <button class="btn btn-primary" id="editModalSave">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal nuevo pedido -->
 <div class="modal-overlay" id="pedidoModal">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('pedidoModal')">✕</button>
-    <h2>Nuevo Pedido</h2>
+    <h2 id="pedidoModalTitle">Nuevo Pedido</h2>
     <div class="form-group"><label>Proveedor</label><input type="text" id="ped-proveedor" placeholder="Nombre del proveedor"></div>
     <div class="form-group"><label>Notas</label><textarea id="ped-notas" rows="2" placeholder="Observaciones..." style="resize:none;"></textarea></div>
     <p class="section-title">Líneas del pedido</p>
@@ -483,11 +502,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
       <span style="font-size:13px;color:var(--text2);">Total estimado:</span>
       <span style="font-size:16px;font-weight:700;color:var(--gold);" id="ped-total">0,00 €</span>
     </div>
-    <button class="btn btn-primary" onclick="savePedido()">📋 Crear pedido</button>
+    <button class="btn btn-primary" id="pedidoSaveBtn" onclick="savePedido()">📋 Crear pedido</button>
   </div>
 </div>
 
-<!-- Modal usuario menú -->
+<!-- Modal menú usuario -->
 <div class="modal-overlay" id="userMenuModal">
   <div class="modal">
     <button class="modal-close" onclick="closeModal('userMenuModal')">✕</button>
@@ -500,6 +519,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
     <button class="btn btn-secondary" onclick="showChangePinModal()">🔑 Cambiar PIN</button>
   </div>
 </div>
+
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="TalkStock.js"></script>
