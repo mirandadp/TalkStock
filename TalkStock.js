@@ -1176,6 +1176,118 @@ async function updateSyncBadge() {
 }
 
 // ══════════════════════════════════════════════
+// EDICIÓN — Material
+// ══════════════════════════════════════════════
+async function editMaterial(id) {
+    const mats = await dbGetAll('materiales'), m = mats.find(x => x.id === id); if (!m) return;
+    const ubics = await dbGetAll('ubicaciones');
+    const ubicOpts = ubics.map(u => `<option value="${u.id}" ${m.ubicacionId === u.id ? 'selected' : ''}>${u.tipo === 'furgoneta' ? '🚐 ' : '🏭 '}${u.nombre}</option>`).join('');
+    document.getElementById('editModalTitle').textContent = 'Editar Material';
+    document.getElementById('editModalBody').innerHTML = `
+    <div class="form-group"><label>Nombre</label><input id="em-nombre" type="text" value="${esc(m.nombre)}"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Cantidad</label><input id="em-qty" type="number" value="${m.cantidad || 0}" min="0"></div>
+      <div class="form-group"><label>Unidad</label><input id="em-unit" type="text" value="${esc(m.unidad || 'ud')}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Precio/ud (€)</label><input id="em-precio" type="number" value="${m.precio || 0}" min="0" step="0.01"></div>
+      <div class="form-group"><label>Stock mínimo</label><input id="em-min" type="number" value="${m.minimo || 0}" min="0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Proveedor</label><input id="em-proveedor" type="text" value="${esc(m.proveedor || '')}"></div>
+      <div class="form-group"><label>Referencia</label><input id="em-ref" type="text" value="${esc(m.referencia || '')}"></div>
+    </div>
+    <div class="form-group"><label>Ubicación</label><select id="em-ubic"><option value="">Sin ubicación</option>${ubicOpts}</select></div>
+    <div class="form-group"><label>Descripción / Notas</label><textarea id="em-desc" rows="2" style="resize:none;">${esc(m.descripcion || '')}</textarea></div>`;
+    document.getElementById('editModalSave').onclick = async () => {
+        const cantidadAnterior = m.cantidad;
+        const cantidadNueva = parseFloat(document.getElementById('em-qty').value) || 0;
+        m.nombre = document.getElementById('em-nombre').value.trim() || m.nombre;
+        m.cantidad = cantidadNueva;
+        m.unidad = document.getElementById('em-unit').value.trim() || 'ud';
+        m.precio = parseFloat(document.getElementById('em-precio').value) || 0;
+        m.minimo = parseInt(document.getElementById('em-min').value) || 0;
+        m.proveedor = document.getElementById('em-proveedor').value.trim();
+        m.referencia = document.getElementById('em-ref').value.trim();
+        m.ubicacionId = parseInt(document.getElementById('em-ubic').value) || null;
+        m.descripcion = document.getElementById('em-desc').value.trim();
+        Object.assign(m, auditStamp()); m.synced = 0;
+        await dbPut('materiales', m);
+        // Registrar ajuste si cambia cantidad
+        if (cantidadNueva !== cantidadAnterior) {
+            const diff = cantidadNueva - cantidadAnterior;
+            await registerMovement(m.id, diff > 0 ? 'entrada' : 'salida', Math.abs(diff), m.ubicacionId, null, 'Ajuste manual');
+        }
+        closeModal('editModal'); toast('✓ Material actualizado', 'success'); renderAll(); scheduleSyncSoon();
+    };
+    document.getElementById('editModal').classList.add('open');
+}
+
+// ══════════════════════════════════════════════
+// EDICIÓN — Ubicación
+// ══════════════════════════════════════════════
+async function editUbicacion(id) {
+    const ubics = await dbGetAll('ubicaciones'), u = ubics.find(x => x.id === id); if (!u) return;
+    document.getElementById('editModalTitle').textContent = 'Editar Ubicación';
+    document.getElementById('editModalBody').innerHTML = `
+    <div class="form-row">
+      <div class="form-group"><label>Nombre</label><input id="eu-nombre" type="text" value="${esc(u.nombre)}"></div>
+      <div class="form-group"><label>Tipo</label>
+        <select id="eu-tipo">
+          <option value="almacen" ${u.tipo === 'almacen' ? 'selected' : ''}>Almacén</option>
+          <option value="furgoneta" ${u.tipo === 'furgoneta' ? 'selected' : ''}>Furgoneta</option>
+          <option value="obra" ${u.tipo === 'obra' ? 'selected' : ''}>Obra</option>
+          <option value="otro" ${u.tipo === 'otro' ? 'selected' : ''}>Otro</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Dirección / Matrícula</label><input id="eu-dir" type="text" value="${esc(u.direccion || '')}"></div>
+    <div class="form-group"><label>Descripción</label><textarea id="eu-desc" rows="3" style="resize:none;">${esc(u.descripcion || '')}</textarea></div>`;
+    document.getElementById('editModalSave').onclick = async () => {
+        u.nombre = document.getElementById('eu-nombre').value.trim() || u.nombre;
+        u.tipo = document.getElementById('eu-tipo').value;
+        u.direccion = document.getElementById('eu-dir').value.trim();
+        u.descripcion = document.getElementById('eu-desc').value.trim();
+        Object.assign(u, auditStamp()); u.synced = 0;
+        await dbPut('ubicaciones', u);
+        closeModal('editModal'); toast('✓ Ubicación actualizada', 'success'); renderAll(); scheduleSyncSoon();
+    };
+    document.getElementById('editModal').classList.add('open');
+}
+
+// ══════════════════════════════════════════════
+// EDICIÓN — Usuario
+// ══════════════════════════════════════════════
+async function editUser(id) {
+    const users = await dbGetAll('usuarios'), u = users.find(x => x.id === id); if (!u) return;
+    document.getElementById('editModalTitle').textContent = 'Editar Usuario';
+    document.getElementById('editModalBody').innerHTML = `
+    <div class="form-group"><label>Nombre</label><input id="eu2-nombre" type="text" value="${esc(u.nombre)}"></div>
+    <div class="form-group"><label>Rol</label>
+      <select id="eu2-rol">
+        <option value="operario" ${u.rol === 'operario' ? 'selected' : ''}>👷 Operario</option>
+        <option value="encargado" ${u.rol === 'encargado' ? 'selected' : ''}>🔑 Encargado</option>
+        <option value="admin" ${u.rol === 'admin' ? 'selected' : ''}>👑 Administrador</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Nuevo PIN (dejar vacío para no cambiar)</label><input id="eu2-pin" type="password" maxlength="4" inputmode="numeric" placeholder="——"></div>`;
+    document.getElementById('editModalSave').onclick = async () => {
+        const nombre = document.getElementById('eu2-nombre').value.trim();
+        const rol = document.getElementById('eu2-rol').value;
+        const pin = document.getElementById('eu2-pin').value.trim();
+        if (!nombre) { toast('El nombre no puede estar vacío', 'error'); return; }
+        if (pin && !/^\d{4}$/.test(pin)) { toast('El PIN debe ser 4 dígitos', 'error'); return; }
+        u.nombre = nombre; u.rol = rol; if (pin) u.pin = pin;
+        Object.assign(u, auditStamp()); u.synced = 0;
+        await dbPut('usuarios', u);
+        // Si es el usuario actual, actualizar sesión
+        if (currentUser?.id === u.id) { currentUser = u; updateTopbarUser(); applyRoleUI(); }
+        closeModal('editModal'); toast('✓ Usuario actualizado', 'success'); renderAdmin(); scheduleSyncSoon();
+    };
+    document.getElementById('editModal').classList.add('open');
+}
+
+// ══════════════════════════════════════════════
 // ACCIONES CRUD
 // ══════════════════════════════════════════════
 function esc(s) { return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
