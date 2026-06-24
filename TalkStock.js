@@ -1738,13 +1738,17 @@ async function printLabels(){
     });
   }
 
+  
+  
   const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb=>parseInt(cb.value));
   const items = labelsData.filter(item=>checked.includes(item.id));
   if(!items.length){ toast('Selecciona al menos una etiqueta','error'); return; }
-
+  
   const cols = parseInt(document.getElementById('label-cols').value)||2;
   const sizeMm = parseInt(document.getElementById('label-size').value)||60;
   const sizePx = sizeMm*3.78; // mm a px aprox 96dpi
+  
+  
 
   const printArea = document.getElementById('print-label-area');
   printArea.innerHTML = '';
@@ -1791,11 +1795,16 @@ async function printLabels(){
     const canvas = printArea.querySelector(`#qrc-${item.id}`);
     if(canvas){
       try{
-        await QRCode.toCanvas(canvas, payload, {
-          width: Math.min(sizePx*0.55, 120),
-          margin:1,
-          color:{ dark:'#1a1a2e', light:'#ffffff' }
-        });
+        var qrc = new QRCode(canvas,{
+            width : Math.min(sizePx*0.55, 120),
+            height : Math.min(sizePx*0.55, 120)
+        })
+        qrc.makeCode(payload);
+        // await QRCode.toCanvas(canvas, payload, {
+        //   width: Math.min(sizePx*0.55, 120),
+        //   margin:1,
+        //   color:{ dark:'#1a1a2e', light:'#ffffff' }
+        // });
       }catch(e){ console.error('QR error',e); }
     }
   }
