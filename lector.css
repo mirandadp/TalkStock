@@ -1,0 +1,372 @@
+/* ══════════════════════════════════════════════════════
+   LECTOR DE PRESENCIA — lector.css
+   Integrar dentro del <style> del index.html principal,
+   o enlazar como hoja externa antes de </head>
+   ══════════════════════════════════════════════════════ */
+
+/* ── Pantalla de fichaje (screen-fichaje) ── */
+#screen-fichaje {
+  display: none;
+  padding: 16px;
+  animation: fadeIn .2s;
+}
+#screen-fichaje.active { display: block; }
+
+/* Cabecera de la pantalla */
+.fichaje-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.fichaje-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.fichaje-header p {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+/* Reloj en tiempo real */
+.fichaje-clock {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  text-align: center;
+  margin-bottom: 16px;
+}
+.fichaje-clock .clock-time {
+  font-size: 38px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.fichaje-clock .clock-date {
+  font-size: 13px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
+/* Selector de operario */
+.fichaje-selector {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.fichaje-selector label {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 8px;
+}
+.fichaje-selector select {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+  font-family: inherit;
+}
+.fichaje-selector select:focus { border-color: var(--accent); }
+
+/* Botones de entrada / salida */
+.fichaje-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.btn-fichaje-in,
+.btn-fichaje-out {
+  border: none;
+  border-radius: var(--radius);
+  padding: 20px 12px;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: transform .15s, box-shadow .15s;
+}
+.btn-fichaje-in:active,
+.btn-fichaje-out:active { transform: scale(.96); }
+.btn-fichaje-in {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(46,204,113,.35);
+}
+.btn-fichaje-out {
+  background: linear-gradient(135deg, #c0392b, #e74c3c);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(231,76,60,.35);
+}
+.btn-fichaje-in .btn-icon-big,
+.btn-fichaje-out .btn-icon-big { font-size: 28px; line-height: 1; }
+.btn-fichaje-in .btn-label,
+.btn-fichaje-out .btn-label { font-size: 15px; font-weight: 800; }
+.btn-fichaje-in .btn-sub,
+.btn-fichaje-out .btn-sub { font-size: 10px; opacity: .8; font-weight: 500; }
+
+/* Estado del operario seleccionado */
+.fichaje-estado {
+  background: var(--bg3);
+  border-radius: var(--rs);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fichaje-estado .estado-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.estado-dentro  { background: var(--success); box-shadow: 0 0 6px rgba(46,204,113,.6); }
+.estado-fuera   { background: var(--text3); }
+.estado-unknown { background: var(--warn); }
+
+/* Tabs del historial */
+.fichaje-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg3);
+  border-radius: var(--rs);
+  padding: 3px;
+  margin-bottom: 12px;
+}
+.fichaje-tab {
+  flex: 1;
+  padding: 7px 4px;
+  border: none;
+  background: none;
+  color: var(--text3);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.fichaje-tab.active { background: var(--card); color: var(--text); }
+
+/* Tabla de fichajes */
+.fichajes-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--rs);
+  border: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+.fichajes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.fichajes-table thead tr {
+  background: var(--bg3);
+}
+.fichajes-table th {
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  white-space: nowrap;
+}
+.fichajes-table td {
+  padding: 9px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text2);
+  vertical-align: middle;
+}
+.fichajes-table tr:hover td { background: rgba(255,255,255,.02); }
+.fichaje-badge-in  { color: var(--success); font-weight: 700; }
+.fichaje-badge-out { color: var(--danger);  font-weight: 700; }
+.fichaje-user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fichaje-user-chip .mini-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.fichaje-duration {
+  font-size: 11px;
+  color: var(--text3);
+  white-space: nowrap;
+}
+
+/* Cards de resumen (vista admin) */
+.fichaje-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.fichaje-stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 12px;
+  text-align: center;
+}
+.fichaje-stat-card .num {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.fichaje-stat-card .lbl {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 2px;
+}
+
+/* Panel de quién está dentro ahora */
+.presentes-list {
+  margin-bottom: 16px;
+}
+.presente-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid rgba(46,204,113,.2);
+  border-radius: var(--rs);
+  padding: 10px 12px;
+  margin-bottom: 7px;
+}
+.presente-item .presente-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.presente-item .presente-info { flex: 1; }
+.presente-item .presente-info h4 { font-size: 14px; font-weight: 600; margin-bottom: 1px; }
+.presente-item .presente-info p  { font-size: 11px; color: var(--text2); }
+.presente-item .presente-time {
+  font-size: 11px;
+  color: var(--success);
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Confirmación toast grande */
+.fichaje-confirm-toast {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  background: rgba(0,0,0,.6);
+  animation: fadeIn .15s;
+}
+.fichaje-confirm-toast.hidden { display: none; }
+.fichaje-confirm-inner {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 32px 24px;
+  text-align: center;
+  max-width: 280px;
+  width: 90%;
+  border: 2px solid var(--success);
+}
+.fichaje-confirm-inner.out { border-color: var(--danger); }
+.fichaje-confirm-inner .confirm-icon { font-size: 56px; margin-bottom: 10px; }
+.fichaje-confirm-inner h3 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.fichaje-confirm-inner p  { font-size: 13px; color: var(--text2); }
+
+/* Filtros historial */
+.fichaje-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.fichaje-filters select,
+.fichaje-filters input {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+/* Paginación */
+.paginacion {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text2);
+}
+.paginacion button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 6px 12px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.paginacion button:disabled { opacity: .4; cursor: default; }
+
+/* Botón exportar */
+.btn-export-fichajes {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--rs);
+  padding: 10px;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 6px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-export-fichajes:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Responsive: si pantalla estrecha, tabla simplificada */
+@media (max-width: 380px) {
+  .fichajes-table th:nth-child(4),
+  .fichajes-table td:nth-child(4) { display: none; }
+  .btn-fichaje-in .btn-sub,
+  .btn-fichaje-out .btn-sub { display: none; }
+}

@@ -8,6 +8,7 @@
   <title>StockVoz</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="talkstock.css">  
+  <link rel="stylesheet" href="lector.css">  
 </head>
 <body>
 
@@ -329,6 +330,162 @@
         </div>
       </div>
     </div>
+
+    <div id="screen-fichaje" class="screen">
+
+  <!-- Toast de confirmación grande (entrada/salida registrada) -->
+  <div class="fichaje-confirm-toast hidden" id="fichaje-toast-overlay"
+       onclick="hideFichajeToast()">
+    <div class="fichaje-confirm-inner" id="fichaje-toast-inner">
+      <div class="confirm-icon" id="fct-icon">✅</div>
+      <h3 id="fct-title">Fichaje registrado</h3>
+      <p id="fct-sub">Juan García · 08:32</p>
+    </div>
+  </div>
+
+  <!-- Reloj en tiempo real -->
+  <div class="fichaje-clock">
+    <div class="clock-time" id="fichaje-clock-time">--:--:--</div>
+    <div class="clock-date" id="fichaje-clock-date">— — —</div>
+  </div>
+
+  <!-- Tabs: Fichar | Presentes | Historial -->
+  <div class="fichaje-tabs">
+    <button class="fichaje-tab active" id="ftab-fichar"
+            onclick="setFichajeTab('fichar')">📲 Fichar</button>
+    <button class="fichaje-tab" id="ftab-presentes"
+            onclick="setFichajeTab('presentes')">🟢 Presentes</button>
+    <button class="fichaje-tab" id="ftab-historial"
+            onclick="setFichajeTab('historial')">📋 Historial</button>
+  </div>
+
+  <!-- ── TAB FICHAR ── -->
+  <div id="ftab-content-fichar">
+
+    <!-- Selector de operario -->
+    <div class="fichaje-selector">
+      <label>Selecciona operario</label>
+      <select id="fichaje-user-sel" onchange="onFichajeUserChange()">
+        <option value="">— Seleccionar —</option>
+      </select>
+    </div>
+
+    <!-- Estado actual del operario -->
+    <div class="fichaje-estado" id="fichaje-estado-bar">
+      <div class="estado-dot estado-unknown" id="fichaje-estado-dot"></div>
+      <span id="fichaje-estado-text" style="color:var(--text2);">
+        Selecciona un operario para ver su estado
+      </span>
+    </div>
+
+    <!-- Botones entrada / salida -->
+    <div class="fichaje-btns">
+      <button class="btn-fichaje-in" onclick="registrarFichaje('entrada')">
+        <div class="btn-icon-big">↑</div>
+        <div class="btn-label">ENTRADA</div>
+        <div class="btn-sub">Inicio jornada</div>
+      </button>
+      <button class="btn-fichaje-out" onclick="registrarFichaje('salida')">
+        <div class="btn-icon-big">↓</div>
+        <div class="btn-label">SALIDA</div>
+        <div class="btn-sub">Fin jornada</div>
+      </button>
+    </div>
+
+    <!-- Stats del día para el operario seleccionado -->
+    <div id="fichaje-hoy-wrap" style="display:none;">
+      <p style="font-size:11px;font-weight:700;color:var(--text3);
+                text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">
+        Hoy
+      </p>
+      <div id="fichaje-hoy-list"></div>
+    </div>
+
+  </div><!-- /ftab-fichar -->
+
+  <!-- ── TAB PRESENTES ── -->
+  <div id="ftab-content-presentes" style="display:none;">
+
+    <div class="fichaje-stats-grid">
+      <div class="fichaje-stat-card">
+        <div class="num" id="fstat-presentes">0</div>
+        <div class="lbl">Presentes ahora</div>
+      </div>
+      <div class="fichaje-stat-card">
+        <div class="num" id="fstat-hoy">0</div>
+        <div class="lbl">Fichajes hoy</div>
+      </div>
+      <div class="fichaje-stat-card">
+        <div class="num" id="fstat-semana">0</div>
+        <div class="lbl">Esta semana</div>
+      </div>
+      <div class="fichaje-stat-card">
+        <div class="num" id="fstat-total">0</div>
+        <div class="lbl">Total registros</div>
+      </div>
+    </div>
+
+    <p style="font-size:12px;font-weight:700;color:var(--text3);
+              text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">
+      En el trabajo ahora
+    </p>
+    <div class="presentes-list" id="presentes-list">
+      <p style="font-size:13px;color:var(--text3);text-align:center;
+                padding:20px 0;">Nadie fichado actualmente</p>
+    </div>
+
+  </div><!-- /ftab-presentes -->
+
+  <!-- ── TAB HISTORIAL ── -->
+  <div id="ftab-content-historial" style="display:none;">
+
+    <!-- Filtros -->
+    <div class="fichaje-filters">
+      <select id="fhist-user-filter" onchange="renderHistorial()">
+        <option value="">Todos los usuarios</option>
+      </select>
+      <input type="date" id="fhist-date-filter"
+             onchange="renderHistorial()"
+             style="max-width:140px;">
+    </div>
+
+    <!-- Tabla -->
+    <div class="fichajes-table-wrap">
+      <table class="fichajes-table">
+        <thead>
+          <tr>
+            <th>Operario</th>
+            <th>Tipo</th>
+            <th>Fecha y hora</th>
+            <th>Duración</th>
+            <th>Nota</th>
+          </tr>
+        </thead>
+        <tbody id="fichajes-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Paginación -->
+    <div class="paginacion" id="fichajes-paginacion">
+      <button onclick="fHistPage(-1)">← Ant.</button>
+      <span id="fhist-page-info">Pág. 1</span>
+      <button onclick="fHistPage(1)">Sig. →</button>
+    </div>
+
+    <!-- Exportar -->
+    <div style="margin-top:14px;">
+      <button class="btn-export-fichajes" onclick="exportFichajesCSV()">
+        📊 Exportar fichajes CSV
+      </button>
+      <button class="btn-export-fichajes" onclick="exportResumenCSV()">
+        📋 Exportar resumen de jornadas
+      </button>
+    </div>
+
+  </div><!-- /ftab-historial -->
+
+</div><!-- /screen-fichaje -->
+
   </div>
 
   <nav id="navbar">
@@ -350,6 +507,15 @@
     <button class="nav-btn" onclick="showScreen('qr')" id="nav-qr">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3m0 4h4v-4m-7 4h3"/></svg>QR
     </button>
+    <button class="nav-btn" onclick="showScreen('fichaje')" id="nav-fichaje">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+  </svg>Presencia
+</button>
   </nav>
 </div>
 
@@ -484,6 +650,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="lector.js"></script>
 <script src="TalkStock.js"></script>
 <script src="qrcode.min.js"></script>
 

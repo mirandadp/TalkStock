@@ -19,6 +19,11 @@ const ROLES = {
         color: '#2ecc71',
         cls: 'role-operario',
         emoji: '👷'
+    },
+     lector_presencia: { 
+        label:'Lector Presencia', 
+        color:'#9b59b6',
+        cls:'role-lector', emoji:'📋' 
     }
 };
 const CAN = {
@@ -30,6 +35,7 @@ const CAN = {
     gestionAdmin: r => r === 'admin',
     editarMaterial: r => r === 'admin' || r === 'encargado',
     editarUbicacion: r => r === 'admin' || r === 'encargado',
+    verFichajes: r => r==='admin' || r==='lector_presencia',
 };
 
 let currentUser = null;
@@ -76,13 +82,13 @@ function fmtDate(d) {
 // ══════════════════════════════════════════════
 let db;
 const DB_NAME = 'StockVozDB'
-  , DB_VER = 5;
+  , DB_VER = 6;
 function initDB() {
     return new Promise( (res, rej) => {
         const req = indexedDB.open(DB_NAME, DB_VER);
         req.onupgradeneeded = e => {
             const d = e.target.result;
-            ['materiales', 'ubicaciones', 'movimientos', 'usuarios', 'pedidos'].forEach(s => {
+            ['materiales', 'ubicaciones', 'movimientos', 'usuarios', 'pedidos', 'fichajes'].forEach(s => {
                 if (!d.objectStoreNames.contains(s))
                     d.createObjectStore(s, {
                         keyPath: 'id',
@@ -252,6 +258,9 @@ function doLogin(u) {
     document.getElementById('app').style.display = 'flex';
     updateTopbarUser();
     applyRoleUI();
+     if(currentUser.rol==='lector_presencia'){
+         showScreen('fichaje'); return;
+       }
     renderAll();
     if (initSupabase()) {
         startRealtime();
@@ -288,6 +297,7 @@ function applyRoleUI() {
     const rol = currentUser.rol;
     document.getElementById('nav-ped').style.display = CAN.verPedidos(rol) ? '' : 'none';
     document.getElementById('nav-admin').style.display = CAN.gestionAdmin(rol) ? '' : 'none';
+     document.getElementById('nav-fichaje').style.display =(CAN.verFichajes(rol)) ? '' : 'none';
     const opPedir = document.getElementById('op-pedir');
     if (opPedir)
         opPedir.style.display = CAN.crearPedidos(rol) ? '' : 'none';
@@ -2259,6 +2269,7 @@ async function editUser(id) {
       <select id="eu2-rol">
         <option value="operario" ${u.rol === 'operario' ? 'selected' : ''}>👷 Operario</option>
         <option value="encargado" ${u.rol === 'encargado' ? 'selected' : ''}>🔑 Encargado</option>
+        <option value="lector_presencia" ${u.rol === 'lector_presencia' ? 'selected' : ''}>📋 Lector de Presencia</option>
         <option value="admin" ${u.rol === 'admin' ? 'selected' : ''}>👑 Administrador</option>
       </select>
     </div>
@@ -2659,7 +2670,7 @@ function showScreen(name) {
         renderAdmin();
         updateStats();
     } else if (name === 'qr') {/* QR screen rendered statically */
-    }
+    }else if(name==='fichaje') renderFichaje();
 }
 
 function setMovTab(tab) {
