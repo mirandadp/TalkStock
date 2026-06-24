@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="talkstock.css">  
 </head>
 <body>
+
 <!-- LOGIN SCREEN -->
 <div id="login-screen">
   <div class="login-logo">📦</div>
@@ -142,6 +143,17 @@
       </div>
     </div>
 
+
+    <!-- QR SCANNER -->
+    <div id="screen-qr" class="screen">
+      <div style="text-align:center;padding:16px 0;">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">Escanea un código QR de material o ubicación, o imprime etiquetas</p>
+        <button class="btn btn-primary" style="margin-bottom:10px;" onclick="openQrScanner('movimiento')">📷 Escanear QR — Registrar movimiento</button>
+        <button class="btn btn-secondary" style="margin-bottom:10px;" onclick="openQrScanner('info')">🔍 Escanear QR — Ver información</button>
+        <div class="divider"></div>
+        <button class="btn btn-secondary" onclick="openQrLabels()">🖨️ Imprimir etiquetas QR</button>
+      </div>
+    </div>
     <!-- INVENTARIO -->
     <div id="screen-inv" class="screen">
       <div class="search-bar">
@@ -180,7 +192,7 @@
       </div>
     </div>
 
-    <!-- ADMIN -->
+    <!-- ADMIN PANEL -->
     <div id="screen-admin" class="screen">
       <div id="lock-admin" class="lock-overlay" style="display:none;">
         <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -200,7 +212,6 @@
           <button class="tab" onclick="setAdminTab('sync')">☁️</button>
           <button class="tab" onclick="setAdminTab('export')">CSV</button>
         </div>
-
         <!-- MATERIALES -->
         <div id="admin-mat">
           <p class="section-title">Añadir Material</p>
@@ -210,7 +221,7 @@
             <div class="form-group"><label>Unidad</label><input type="text" id="matUnit" placeholder="ud, m, kg..."></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>Precio unitario (€)</label><input type="number" id="matPrecio" value="0" min="0" step="0.01"></div>
+            <div class="form-group"><label>Precio unitario (€)</label><input type="number" id="matPrecio" value="0" min="0" step="0.01" placeholder="0.00"></div>
             <div class="form-group"><label>Stock mínimo</label><input type="number" id="matMin" value="0" min="0"></div>
           </div>
           <div class="form-row">
@@ -223,9 +234,8 @@
           <p class="section-title">Materiales registrados</p>
           <div id="matList"></div>
         </div>
-
-        <!-- UBICACIONES -->
-        <div id="admin-ubic" style="display:none;">
+         <!-- UBICACIONES -->
+         <div id="admin-ubic" style="display:none;">
           <p class="section-title">Añadir Ubicación</p>
           <div class="form-row">
             <div class="form-group"><label>Nombre</label><input type="text" id="ubicNombre" placeholder="Ej: Almacén A"></div>
@@ -275,15 +285,22 @@
 
         <!-- SYNC -->
         <div id="admin-sync" style="display:none;">
-          <div class="sb-info"><p>☁️ Sincronización Supabase</p><p>Gratuito y permanente. Los datos se sincronizan en tiempo real entre todos los dispositivos.</p></div>
+          <div class="sb-info">
+            <p>☁️ Sincronización Supabase</p>
+            <p>Gratuito y permanente. Los datos se sincronizan en tiempo real entre todos los dispositivos.</p>
+          </div>
           <div id="sb-connected" style="display:none;">
-            <div class="sb-ok"><p>✓ Conectado a Supabase</p><p id="sb-url-show"></p><p id="rt-status" style="color:var(--text3);margin-top:3px;">🔄 Iniciando...</p></div>
+            <div class="sb-ok">
+              <p>✓ Conectado a Supabase</p>
+              <p id="sb-url-show"></p>
+              <p id="rt-status" style="color:var(--text3);margin-top:3px;">🔄 Iniciando tiempo real...</p>
+            </div>
             <button class="btn btn-primary" onclick="syncNow()" style="margin-bottom:7px;">🔄 Sincronizar ahora</button>
             <button class="btn btn-secondary" onclick="pullRemoteData()" style="margin-bottom:7px;">⬇️ Forzar descarga</button>
             <button class="btn btn-danger" onclick="clearSupabaseConfig()">🔌 Desconectar</button>
           </div>
           <div id="sb-form">
-            <p class="section-title">Paso 1 — Proyecto Supabase</p>
+            <p class="section-title">Paso 1 — Crear proyecto</p>
             <div class="setup-steps">
               1. <strong style="color:var(--accent)">supabase.com</strong> → New Project (gratis)<br>
               2. Settings → API → copia URL y anon key<br>
@@ -330,8 +347,81 @@
     <button class="nav-btn" onclick="showScreen('admin')" id="nav-admin">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Admin
     </button>
+    <button class="nav-btn" onclick="showScreen('qr')" id="nav-qr">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3m0 4h4v-4m-7 4h3"/></svg>QR
+    </button>
   </nav>
 </div>
+
+
+<!-- QR SCANNER OVERLAY (cámara) -->
+<div id="qr-scanner-overlay">
+  <div id="qr-topbar">
+    <h2 id="qr-scanner-title">📷 Escanear QR</h2>
+    <button id="qr-close-btn" onclick="closeQrScanner()">✕ Cerrar</button>
+  </div>
+  <div id="qr-mode-tabs">
+    <button id="qr-tab-mov" class="qr-tab-active" onclick="setQrMode('movimiento')">↕ Movimiento</button>
+    <button id="qr-tab-info" class="qr-tab-inactive" onclick="setQrMode('info')">ℹ️ Info</button>
+  </div>
+  <div id="qr-video-wrap">
+    <video id="qr-video" autoplay playsinline muted></video>
+    <div id="qr-viewfinder">
+      <div class="qr-corner tr"></div>
+      <div class="qr-corner bl"></div>
+      <div id="qr-scan-line"></div>
+    </div>
+  </div>
+  <div id="qr-status">Apunta la cámara al código QR</div>
+</div>
+
+<!-- QR ACTION SHEET (tras escanear) -->
+<div id="qr-action-sheet">
+  <div class="qr-sheet-inner">
+    <button class="modal-close" onclick="closeQrSheet()" style="float:right;background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;">✕</button>
+    <h2 id="qra-title">Material encontrado</h2>
+    <p id="qra-desc"></p>
+    <div id="qra-body"></div>
+  </div>
+</div>
+
+<!-- QR LABELS MODAL -->
+<div class="modal-overlay" id="qr-labels-modal">
+  <div class="modal" id="qr-labels-modal-inner">
+    <button class="modal-close" onclick="closeModal('qr-labels-modal')">✕</button>
+    <h2>🖨️ Etiquetas QR</h2>
+    <div class="tabs" style="margin-bottom:12px;">
+      <button class="tab active" onclick="setLabelsTab('materiales')">Materiales</button>
+      <button class="tab" onclick="setLabelsTab('ubicaciones')">Ubicaciones</button>
+    </div>
+    <div id="labels-search-wrap" style="margin-bottom:10px;">
+      <input type="search" id="labels-search" placeholder="Filtrar..." oninput="renderLabelsList()" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:9px 12px;color:var(--text);font-size:13px;outline:none;">
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button onclick="selectAllLabels(true)" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:7px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text2);">Seleccionar todos</button>
+      <button onclick="selectAllLabels(false)" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:7px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text2);">Ninguno</button>
+    </div>
+    <div id="labels-list" class="label-grid"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <label style="font-size:12px;color:var(--text2);">Tamaño:</label>
+      <select id="label-size" style="background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:7px;color:var(--text);font-size:13px;outline:none;">
+        <option value="60">60×40 mm (estándar)</option>
+        <option value="40">40×30 mm (pequeña)</option>
+        <option value="80">80×50 mm (grande)</option>
+      </select>
+      <label style="font-size:12px;color:var(--text2);">por fila:</label>
+      <select id="label-cols" style="background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:7px;color:var(--text);font-size:13px;outline:none;">
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" onclick="printLabels()">🖨️ Imprimir etiquetas seleccionadas</button>
+  </div>
+</div>
+
+<!-- Área de impresión oculta -->
+<div id="print-label-area"></div>
 
 <div id="toast"></div>
 
@@ -392,7 +482,6 @@
     <button class="btn btn-secondary" onclick="showChangePinModal()">🔑 Cambiar PIN</button>
   </div>
 </div>
-
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="TalkStock.js"></script>

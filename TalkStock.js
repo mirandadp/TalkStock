@@ -16,6 +16,7 @@ const CAN = {
     editarMaterial: r => r === 'admin' || r === 'encargado',
     editarUbicacion: r => r === 'admin' || r === 'encargado',
 };
+
 let currentUser = null;
 function hasPermiso(p) {
     return currentUser && CAN[p]?.(currentUser.rol);
@@ -76,8 +77,9 @@ function dbClear(s) {
     });
 }
 
+
 // ══════════════════════════════════════════════
-// LOGIN
+// LOGIN / USUARIOS
 // ══════════════════════════════════════════════
 let pinBuffer = '';
 async function initLogin() {
@@ -129,65 +131,108 @@ function backToUserSelect() {
     document.getElementById('login-user-sel').value = '';
     pinBuffer = '';
 }
-function pinPress(d) { if (pinBuffer.length >= 4) return; pinBuffer += d; renderPinDots(); if (pinBuffer.length === 4) setTimeout(checkPin, 200); }
-function pinDel() { if (pinBuffer.length > 0) { pinBuffer = pinBuffer.slice(0, -1); renderPinDots(); } }
-function renderPinDots() { for (let i = 0; i < 4; i++)document.getElementById('pd' + i).className = 'pin-dot' + (i < pinBuffer.length ? ' filled' : ''); }
-async function checkPin() {
-    const id = parseInt(document.getElementById('login-user-sel').value);
-    const us = await dbGetAll('usuarios'); const u = us.find(x => x.id === id);
-    if (u && u.pin === pinBuffer) doLogin(u);
-    else { toast('PIN incorrecto', 'error'); pinBuffer = ''; renderPinDots(); }
+
+
+function pinPress(d){
+  if(pinBuffer.length>=4)return;
+  pinBuffer+=d;
+  renderPinDots();
+  if(pinBuffer.length===4) setTimeout(checkPin,200);
 }
-function doLogin(u) {
-    currentUser = u; localStorage.setItem('sv_session', JSON.stringify({ id: u.id }));
-    document.getElementById('login-screen').classList.add('hidden'); document.getElementById('app').style.display = 'flex';
-    updateTopbarUser(); applyRoleUI(); renderAll();
-    if (initSupabase()) { startRealtime(); scheduleSyncSoon(); }
-    updateNetStatus();
+function pinDel(){ if(pinBuffer.length>0){pinBuffer=pinBuffer.slice(0,-1);renderPinDots();} }
+function renderPinDots(){
+  for(let i=0;i<4;i++) document.getElementById('pd'+i).className='pin-dot'+(i<pinBuffer.length?' filled':'');
 }
-function doLogout() {
-    closeModal('userMenuModal'); currentUser = null; localStorage.removeItem('sv_session');
-    document.getElementById('app').style.display = 'none'; document.getElementById('login-screen').classList.remove('hidden');
-    pinBuffer = ''; renderPinDots(); backToUserSelect(); initLogin();
+
+async function checkPin(){
+  const id=parseInt(document.getElementById('login-user-sel').value);
+  const usuarios=await dbGetAll('usuarios');
+  const u=usuarios.find(x=>x.id===id);
+  if(u&&u.pin===pinBuffer){
+    doLogin(u);
+  } else {
+    toast('PIN incorrecto','error');
+    pinBuffer='';
+    renderPinDots();
+  }
 }
-function updateTopbarUser() {
-    if (!currentUser) return; const r = ROLES[currentUser.rol];
-    document.getElementById('topbar-avatar').textContent = currentUser.nombre.charAt(0).toUpperCase();
-    document.getElementById('topbar-avatar').style.background = r.color + '33'; document.getElementById('topbar-avatar').style.color = r.color;
-    document.getElementById('topbar-name').textContent = currentUser.nombre;
+
+function doLogin(u){
+  currentUser=u;
+  localStorage.setItem('sv_session',JSON.stringify({id:u.id}));
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app').style.display='flex';
+  updateTopbarUser();
+  applyRoleUI();
+  renderAll();
+  if(initSupabase()){startRealtime();scheduleSyncSoon();}
+  updateNetStatus();
 }
-function applyRoleUI() {
-    if (!currentUser) return; const rol = currentUser.rol;
-    document.getElementById('nav-ped').style.display = CAN.verPedidos(rol) ? '' : 'none';
-    document.getElementById('nav-admin').style.display = CAN.gestionAdmin(rol) ? '' : 'none';
+
+function doLogout(){
+  closeModal('userMenuModal');
+  currentUser=null;
+  localStorage.removeItem('sv_session');
+  document.getElementById('app').style.display='none';
+  document.getElementById('login-screen').classList.remove('hidden');
+  pinBuffer='';
+  renderPinDots();
+  backToUserSelect();
+  initLogin();
 }
-function showUserMenu() {
-    if (!currentUser) return; const r = ROLES[currentUser.rol];
-    document.getElementById('um-avatar').textContent = currentUser.nombre.charAt(0).toUpperCase();
-    document.getElementById('um-avatar').style.background = r.color + '33'; document.getElementById('um-avatar').style.color = r.color;
-    document.getElementById('um-name').textContent = currentUser.nombre;
-    document.getElementById('um-role').innerHTML = `<span class="role-badge ${r.cls}">${r.emoji} ${r.label}</span>`;
-    document.getElementById('userMenuModal').classList.add('open');
+
+function updateTopbarUser(){
+  if(!currentUser)return;
+  const r=ROLES[currentUser.rol];
+  document.getElementById('topbar-avatar').textContent=currentUser.nombre.charAt(0).toUpperCase();
+  document.getElementById('topbar-avatar').style.background=r.color+'33';
+  document.getElementById('topbar-avatar').style.color=r.color;
+  document.getElementById('topbar-name').textContent=currentUser.nombre;
 }
-function showChangePinModal() {
-    closeModal('userMenuModal');
-    showConfirmModal('Cambiar PIN',
-        `<div class="form-group"><label>PIN actual</label><input type="password" id="pin-old" maxlength="4" inputmode="numeric" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:10px;color:var(--text);font-size:14px;outline:none;"></div>
-     <div class="form-group"><label>Nuevo PIN</label><input type="password" id="pin-new" maxlength="4" inputmode="numeric" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:10px;color:var(--text);font-size:14px;outline:none;"></div>`,
-        async () => {
-            const old = document.getElementById('pin-old').value; const nw = document.getElementById('pin-new').value;
-            if (old !== currentUser.pin) { toast('PIN actual incorrecto', 'error'); return; }
-            if (!/^\d{4}$/.test(nw)) { toast('El PIN debe ser 4 dígitos', 'error'); return; }
-            currentUser.pin = nw; Object.assign(currentUser, auditStamp()); currentUser.synced = 0;
-            await dbPut('usuarios', currentUser); toast('✓ PIN actualizado', 'success'); scheduleSyncSoon();
-        }, 'Guardar');
+
+function applyRoleUI(){
+  if(!currentUser)return;
+  const rol=currentUser.rol;
+  document.getElementById('nav-ped').style.display=CAN.verPedidos(rol)?'':'none';
+  document.getElementById('nav-admin').style.display=CAN.gestionAdmin(rol)?'':'none';
+  const opPedir=document.getElementById('op-pedir');
+  if(opPedir)opPedir.style.display=CAN.crearPedidos(rol)?'':'none';
+}
+
+function showUserMenu(){
+  if(!currentUser)return;
+  const r=ROLES[currentUser.rol];
+  document.getElementById('um-avatar').textContent=currentUser.nombre.charAt(0).toUpperCase();
+  document.getElementById('um-avatar').style.background=r.color+'33';
+  document.getElementById('um-avatar').style.color=r.color;
+  document.getElementById('um-name').textContent=currentUser.nombre;
+  document.getElementById('um-role').innerHTML=`<span class="role-badge ${r.cls}">${r.emoji} ${r.label}</span>`;
+  document.getElementById('userMenuModal').classList.add('open');
+}
+
+function showChangePinModal(){
+  closeModal('userMenuModal');
+  showConfirmModal('Cambiar PIN',
+    `<div class="form-group"><label>PIN actual</label><input type="password" id="pin-old" maxlength="4" inputmode="numeric" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:10px;color:var(--text);width:100%;"></div>
+     <div class="form-group"><label>Nuevo PIN</label><input type="password" id="pin-new" maxlength="4" inputmode="numeric" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:10px;color:var(--text);width:100%;"></div>`,
+    async()=>{
+      const old=document.getElementById('pin-old').value;
+      const nw=document.getElementById('pin-new').value;
+      if(old!==currentUser.pin){toast('PIN actual incorrecto','error');return;}
+      if(!/^\d{4}$/.test(nw)){toast('El PIN debe ser 4 dígitos','error');return;}
+      currentUser.pin=nw; currentUser.synced=0;
+      await dbPut('usuarios',currentUser);
+      toast('✓ PIN actualizado','success');
+      scheduleSyncSoon();
+    },'Guardar');
 }
 
 // ══════════════════════════════════════════════
-// SUPABASE
+// SUPABASE SYNC
 // ══════════════════════════════════════════════
-let SB = null, rtChannel = null, syncBusy = false;
-const SETUP_SQL = `-- StockVoz v4 — pega en SQL Editor de Supabase y ejecuta
+let SB=null, rtChannel=null, syncBusy=false;
+
+const SETUP_SQL=`-- StockVoz — SQL para Supabase (pega y ejecuta en SQL Editor)
 
 create table if not exists ubicaciones(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,tipo text default 'almacen',direccion text,descripcion text,creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists materiales(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,cantidad numeric default 0,unidad text default 'ud',precio numeric default 0,minimo numeric default 0,proveedor text,referencia text,descripcion text,ubicacion_id uuid references ubicaciones(id),creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
@@ -205,6 +250,7 @@ alter publication supabase_realtime add table movimientos;
 alter publication supabase_realtime add table materiales;
 alter publication supabase_realtime add table pedidos;
 alter publication supabase_realtime add table ubicaciones;`.trim();
+
 
 function getSBConfig() { return { url: localStorage.getItem('sb_url') || '', key: localStorage.getItem('sb_key') || '' }; }
 function initSupabase() { const { url, key } = getSBConfig(); if (!url || !key) return false; try { SB = window.supabase.createClient(url, key); return true; } catch (e) { return false; } }
@@ -842,11 +888,23 @@ async function searchMaterialVoice(query){
   await wizDoSearch(query);
 }
 
+// ── Mostrar etiqueta QR rápida de un ítem ──
+async function showItemQrLabel(id, type){
+  await openQrLabels();
+  labelsTab = type==='material' ? 'materiales' : 'ubicaciones';
+  await renderLabelsList();
+  // Desmarcar todos y marcar solo el seleccionado
+  selectAllLabels(false);
+  const cb = document.querySelector(`#labels-list input[value="${id}"]`);
+  if(cb) cb.checked = true;
+}
+
+let qrPreselectedMat = null;
+
 async function registerMovement(matId,tipo,cantidad,ubicId,destUbicId,nota){
   await dbAdd('movimientos',{materialId:matId,tipo,cantidad,ubicacionId:ubicId||null,ubicacionDestinoId:destUbicId||null,fecha:new Date().toISOString(),nota:nota||'',synced:0,usuario:currentUser?.nombre||''});
   updateSyncBadge();
 }
-
 
 // ══════════════════════════════════════════════
 // PEDIDOS
@@ -889,6 +947,7 @@ async function renderPedLines() {
     </div>`).join('');
     updatePedTotal();
 }
+
 async function pedLineMatChange(i, matId) {
     const mats = await dbGetAll('materiales'), mat = mats.find(m => m.id === parseInt(matId));
     if (mat) { pedLines[i].materialId = mat.id; pedLines[i].nombre = mat.nombre; pedLines[i].precio = mat.precio || 0; pedLines[i].subtotal = pedLines[i].cantidad * (mat.precio || 0); }
@@ -1004,9 +1063,15 @@ async function filterInventory(mats, ubics, ubicMap) {
         </div>
       </div>
       ${canEdit ? `<div class="card-actions"><button class="btn btn-edit" onclick="editMaterial(${m.id})">✏️ Editar</button></div>` : ''}
+
+      <div style="display:flex;gap:6px;margin-top:8px;border-top:1px solid rgba(255,255,255,.05);padding-top:8px;">
+        <button onclick="openQrScanner('movimiento');qrPreselectedMat=${m.id}" style="flex:1;background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.2);color:var(--accent);border-radius:var(--rs);padding:7px;font-size:11px;font-weight:600;cursor:pointer;">↕ Movimiento</button>
+        <button onclick="showItemQrLabel(${m.id},'material')" style="flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:var(--rs);padding:7px;font-size:11px;font-weight:600;cursor:pointer;">🏷️ Etiqueta QR</button>
+      </div>
     </div>`;
-    }).join('');
+  }).join('');
 }
+
 
 async function renderMovements() {
     const [movs, mats, ubics] = await Promise.all([dbGetAll('movimientos'), dbGetAll('materiales'), dbGetAll('ubicaciones')]);
@@ -1111,118 +1176,6 @@ async function updateSyncBadge() {
 }
 
 // ══════════════════════════════════════════════
-// EDICIÓN — Material
-// ══════════════════════════════════════════════
-async function editMaterial(id) {
-    const mats = await dbGetAll('materiales'), m = mats.find(x => x.id === id); if (!m) return;
-    const ubics = await dbGetAll('ubicaciones');
-    const ubicOpts = ubics.map(u => `<option value="${u.id}" ${m.ubicacionId === u.id ? 'selected' : ''}>${u.tipo === 'furgoneta' ? '🚐 ' : '🏭 '}${u.nombre}</option>`).join('');
-    document.getElementById('editModalTitle').textContent = 'Editar Material';
-    document.getElementById('editModalBody').innerHTML = `
-    <div class="form-group"><label>Nombre</label><input id="em-nombre" type="text" value="${esc(m.nombre)}"></div>
-    <div class="form-row">
-      <div class="form-group"><label>Cantidad</label><input id="em-qty" type="number" value="${m.cantidad || 0}" min="0"></div>
-      <div class="form-group"><label>Unidad</label><input id="em-unit" type="text" value="${esc(m.unidad || 'ud')}"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Precio/ud (€)</label><input id="em-precio" type="number" value="${m.precio || 0}" min="0" step="0.01"></div>
-      <div class="form-group"><label>Stock mínimo</label><input id="em-min" type="number" value="${m.minimo || 0}" min="0"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Proveedor</label><input id="em-proveedor" type="text" value="${esc(m.proveedor || '')}"></div>
-      <div class="form-group"><label>Referencia</label><input id="em-ref" type="text" value="${esc(m.referencia || '')}"></div>
-    </div>
-    <div class="form-group"><label>Ubicación</label><select id="em-ubic"><option value="">Sin ubicación</option>${ubicOpts}</select></div>
-    <div class="form-group"><label>Descripción / Notas</label><textarea id="em-desc" rows="2" style="resize:none;">${esc(m.descripcion || '')}</textarea></div>`;
-    document.getElementById('editModalSave').onclick = async () => {
-        const cantidadAnterior = m.cantidad;
-        const cantidadNueva = parseFloat(document.getElementById('em-qty').value) || 0;
-        m.nombre = document.getElementById('em-nombre').value.trim() || m.nombre;
-        m.cantidad = cantidadNueva;
-        m.unidad = document.getElementById('em-unit').value.trim() || 'ud';
-        m.precio = parseFloat(document.getElementById('em-precio').value) || 0;
-        m.minimo = parseInt(document.getElementById('em-min').value) || 0;
-        m.proveedor = document.getElementById('em-proveedor').value.trim();
-        m.referencia = document.getElementById('em-ref').value.trim();
-        m.ubicacionId = parseInt(document.getElementById('em-ubic').value) || null;
-        m.descripcion = document.getElementById('em-desc').value.trim();
-        Object.assign(m, auditStamp()); m.synced = 0;
-        await dbPut('materiales', m);
-        // Registrar ajuste si cambia cantidad
-        if (cantidadNueva !== cantidadAnterior) {
-            const diff = cantidadNueva - cantidadAnterior;
-            await registerMovement(m.id, diff > 0 ? 'entrada' : 'salida', Math.abs(diff), m.ubicacionId, null, 'Ajuste manual');
-        }
-        closeModal('editModal'); toast('✓ Material actualizado', 'success'); renderAll(); scheduleSyncSoon();
-    };
-    document.getElementById('editModal').classList.add('open');
-}
-
-// ══════════════════════════════════════════════
-// EDICIÓN — Ubicación
-// ══════════════════════════════════════════════
-async function editUbicacion(id) {
-    const ubics = await dbGetAll('ubicaciones'), u = ubics.find(x => x.id === id); if (!u) return;
-    document.getElementById('editModalTitle').textContent = 'Editar Ubicación';
-    document.getElementById('editModalBody').innerHTML = `
-    <div class="form-row">
-      <div class="form-group"><label>Nombre</label><input id="eu-nombre" type="text" value="${esc(u.nombre)}"></div>
-      <div class="form-group"><label>Tipo</label>
-        <select id="eu-tipo">
-          <option value="almacen" ${u.tipo === 'almacen' ? 'selected' : ''}>Almacén</option>
-          <option value="furgoneta" ${u.tipo === 'furgoneta' ? 'selected' : ''}>Furgoneta</option>
-          <option value="obra" ${u.tipo === 'obra' ? 'selected' : ''}>Obra</option>
-          <option value="otro" ${u.tipo === 'otro' ? 'selected' : ''}>Otro</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group"><label>Dirección / Matrícula</label><input id="eu-dir" type="text" value="${esc(u.direccion || '')}"></div>
-    <div class="form-group"><label>Descripción</label><textarea id="eu-desc" rows="3" style="resize:none;">${esc(u.descripcion || '')}</textarea></div>`;
-    document.getElementById('editModalSave').onclick = async () => {
-        u.nombre = document.getElementById('eu-nombre').value.trim() || u.nombre;
-        u.tipo = document.getElementById('eu-tipo').value;
-        u.direccion = document.getElementById('eu-dir').value.trim();
-        u.descripcion = document.getElementById('eu-desc').value.trim();
-        Object.assign(u, auditStamp()); u.synced = 0;
-        await dbPut('ubicaciones', u);
-        closeModal('editModal'); toast('✓ Ubicación actualizada', 'success'); renderAll(); scheduleSyncSoon();
-    };
-    document.getElementById('editModal').classList.add('open');
-}
-
-// ══════════════════════════════════════════════
-// EDICIÓN — Usuario
-// ══════════════════════════════════════════════
-async function editUser(id) {
-    const users = await dbGetAll('usuarios'), u = users.find(x => x.id === id); if (!u) return;
-    document.getElementById('editModalTitle').textContent = 'Editar Usuario';
-    document.getElementById('editModalBody').innerHTML = `
-    <div class="form-group"><label>Nombre</label><input id="eu2-nombre" type="text" value="${esc(u.nombre)}"></div>
-    <div class="form-group"><label>Rol</label>
-      <select id="eu2-rol">
-        <option value="operario" ${u.rol === 'operario' ? 'selected' : ''}>👷 Operario</option>
-        <option value="encargado" ${u.rol === 'encargado' ? 'selected' : ''}>🔑 Encargado</option>
-        <option value="admin" ${u.rol === 'admin' ? 'selected' : ''}>👑 Administrador</option>
-      </select>
-    </div>
-    <div class="form-group"><label>Nuevo PIN (dejar vacío para no cambiar)</label><input id="eu2-pin" type="password" maxlength="4" inputmode="numeric" placeholder="——"></div>`;
-    document.getElementById('editModalSave').onclick = async () => {
-        const nombre = document.getElementById('eu2-nombre').value.trim();
-        const rol = document.getElementById('eu2-rol').value;
-        const pin = document.getElementById('eu2-pin').value.trim();
-        if (!nombre) { toast('El nombre no puede estar vacío', 'error'); return; }
-        if (pin && !/^\d{4}$/.test(pin)) { toast('El PIN debe ser 4 dígitos', 'error'); return; }
-        u.nombre = nombre; u.rol = rol; if (pin) u.pin = pin;
-        Object.assign(u, auditStamp()); u.synced = 0;
-        await dbPut('usuarios', u);
-        // Si es el usuario actual, actualizar sesión
-        if (currentUser?.id === u.id) { currentUser = u; updateTopbarUser(); applyRoleUI(); }
-        closeModal('editModal'); toast('✓ Usuario actualizado', 'success'); renderAdmin(); scheduleSyncSoon();
-    };
-    document.getElementById('editModal').classList.add('open');
-}
-
-// ══════════════════════════════════════════════
 // ACCIONES CRUD
 // ══════════════════════════════════════════════
 function esc(s) { return (s || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -1240,8 +1193,11 @@ async function addUser() {
 }
 async function deleteUser(id) {
     if (currentUser?.id === id) { toast('No puedes eliminarte a ti mismo', 'error'); return; }
-    showConfirmModal('Eliminar usuario', '<p style="font-size:13px;color:var(--text2);">¿Eliminar este usuario?</p>', async () => { await dbDelete('usuarios', id); toast('Usuario eliminado', 'success'); renderAdmin(); });
+    showConfirmModal('Eliminar usuario', '<p style="font-size:13px;color:var(--text2);">¿Eliminar este usuario?</p>', async () => { 
+        await dbDelete('usuarios', id); 
+        toast('Usuario eliminado', 'success'); renderAdmin(); });
 }
+
 async function addMaterial() {
     const n = document.getElementById('matNombre').value.trim(); if (!n) { toast('Escribe el nombre', 'error'); return; }
     const qty = parseFloat(document.getElementById('matQty').value) || 0;
@@ -1256,7 +1212,8 @@ async function addMaterial() {
     const id = await dbAdd('materiales', { nombre: n, cantidad: qty, unidad: unit, precio, ubicacionId: ubicId, minimo: min, proveedor, referencia: ref, descripcion: desc, creado: now, creadoPor: currentUser?.nombre || '', ...auditStamp(), synced: 0 });
     if (qty > 0) await registerMovement(id, 'entrada', qty, ubicId, null, 'Inventario inicial');
     ['matNombre', 'matUnit', 'matProveedor', 'matRef', 'matDesc'].forEach(i => { const el = document.getElementById(i); if (el) el.value = ''; });
-    ['matQty', 'matPrecio', 'matMin'].forEach(i => { const el = document.getElementById(i); if (el) el.value = '0'; });
+    ['matQty', 'matPrecio', 'matMin'].forEach(i => { const el = document.getElementById(i);
+         if (el) el.value = '0'; });
     toast('✓ Material añadido', 'success'); renderAll(); scheduleSyncSoon();
 }
 async function deleteMaterial(id) { showConfirmModal('Eliminar material', '<p style="font-size:13px;color:var(--text2);">¿Eliminar este material?</p>', async () => { await dbDelete('materiales', id); toast('Eliminado', 'success'); renderAll(); }); }
@@ -1338,48 +1295,405 @@ async function clearAllData() {
 // ══════════════════════════════════════════════
 // UI HELPERS
 // ══════════════════════════════════════════════
-function showScreen(name) {
-    if (name === 'ped' && !hasPermiso('verPedidos')) { toast('Sin permiso', 'error'); return; }
-    if (name === 'admin' && !hasPermiso('gestionAdmin')) { toast('Solo administradores', 'error'); return; }
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('screen-' + name).classList.add('active');
-    document.getElementById('nav-' + name).classList.add('active');
-    if (name === 'inv') renderInventory(); else if (name === 'mov') renderMovements();
-    else if (name === 'ped') renderPedidos(); else if (name === 'admin') { renderAdmin(); updateStats(); }
+function showScreen(name){
+  if(name==='ped'&&!hasPermiso('verPedidos')){toast('Sin permiso','error');return;}
+  if(name==='admin'&&!hasPermiso('gestionAdmin')){toast('Solo administradores','error');return;}
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('screen-'+name).classList.add('active');
+  const nb=document.getElementById('nav-'+name);if(nb)nb.classList.add('active');
+  if(name==='inv')renderInventory();
+  else if(name==='mov')renderMovements();
+  else if(name==='ped')renderPedidos();
+  else if(name==='admin'){renderAdmin();updateStats();}
+  else if(name==='qr'){/* QR screen rendered statically */}
 }
-function setMovTab(tab) { currentMovTab = tab; document.querySelectorAll('#screen-mov .tab').forEach((t, i) => t.classList.toggle('active', ['all', 'entrada', 'salida'][i] === tab)); renderMovements(); }
-function setAdminTab(tab) {
-    currentAdminTab = tab;
-    ['mat', 'ubic', 'users', 'sync', 'export'].forEach(t => { const el = document.getElementById('admin-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
-    document.querySelectorAll('#screen-admin .tabs .tab').forEach((t, i) => t.classList.toggle('active', ['mat', 'ubic', 'users', 'sync', 'export'][i] === tab));
-    if (tab === 'sync') renderSyncScreen(); else if (tab !== 'mat') renderAdmin();
+
+function setMovTab(tab){currentMovTab=tab;document.querySelectorAll('#screen-mov .tab').forEach((t,i)=>t.classList.toggle('active',['all','entrada','salida'][i]===tab));renderMovements();}
+
+function setAdminTab(tab){
+  currentAdminTab=tab;
+  ['mat','ubic','users','sync','export'].forEach(t=>{const el=document.getElementById('admin-'+t);if(el)el.style.display=t===tab?'block':'none';});
+  document.querySelectorAll('#screen-admin .tabs .tab').forEach((t,i)=>t.classList.toggle('active',['mat','ubic','users','sync','export'][i]===tab));
+  if(tab==='sync')renderSyncScreen();else if(tab!=='mat')renderAdmin();
 }
-function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
-    document.getElementById('confirmTitle').textContent = title;
-    document.getElementById('confirmBody').innerHTML = body;
-    document.getElementById('confirmBtn').textContent = confirmLabel;
-    document.getElementById('confirmBtn').onclick = () => { closeModal('confirmModal'); onConfirm(); };
-    document.getElementById('confirmModal').classList.add('open');
+
+function showConfirmModal(title,body,onConfirm,confirmLabel='Confirmar'){
+  document.getElementById('confirmTitle').textContent=title;
+  document.getElementById('confirmBody').innerHTML=body;
+  document.getElementById('confirmBtn').textContent=confirmLabel;
+  document.getElementById('confirmBtn').onclick=()=>{closeModal('confirmModal');onConfirm();};
+  document.getElementById('confirmModal').classList.add('open');
 }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+
 let toastTimer;
-function toast(msg, type = '') { const el = document.getElementById('toast'); el.textContent = msg; el.className = 'show ' + type; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = '', 3000); }
-function updateNetStatus() {
-    const el = document.getElementById('net-status'); if (!el) return;
-    if (navigator.onLine) { el.textContent = 'Online'; el.className = 'status online'; scheduleSyncSoon(); }
-    else { el.textContent = 'Offline'; el.className = 'status offline'; }
+function toast(msg,type=''){const el=document.getElementById('toast');el.textContent=msg;el.className='show '+type;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.className='',3000);}
+
+function updateNetStatus(){
+  const el=document.getElementById('net-status');if(!el)return;
+  if(navigator.onLine){el.textContent='Online';el.className='status online';scheduleSyncSoon();}
+  else{el.textContent='Offline';el.className='status offline';}
 }
-window.addEventListener('online', updateNetStatus);
-window.addEventListener('offline', updateNetStatus);
+window.addEventListener('online',updateNetStatus);
+window.addEventListener('offline',updateNetStatus);
 
 // ══════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════
-(async () => {
-    await initDB(); initVoice(); await initLogin();
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
+(async()=>{
+  await initDB();
+  initVoice();
+  await initLogin();
+  if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
+
+// ══════════════════════════════════════════════
+// QR — ESCÁNER Y ETIQUETAS
+// ══════════════════════════════════════════════
+let qrStream = null, qrWorking = false, qrMode = 'movimiento', qrAnimId = null;
+let labelsTab = 'materiales', labelsData = [];
+
+// ── Abrir escáner ──
+async function openQrScanner(mode){
+  qrMode = mode;
+  setQrMode(mode);
+  document.getElementById('qr-scanner-overlay').classList.add('open');
+  document.getElementById('qr-status').textContent = 'Iniciando cámara…';
+  try {
+    qrStream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:'environment', width:{ideal:1280}, height:{ideal:720} }
+    });
+    const video = document.getElementById('qr-video');
+    video.srcObject = qrStream;
+    await video.play();
+    qrWorking = false;
+    document.getElementById('qr-status').textContent = 'Apunta la cámara al código QR';
+    startQrDetection();
+  } catch(e) {
+    document.getElementById('qr-status').textContent = '⚠️ Cámara no disponible: ' + e.message;
+  }
+}
+
+function closeQrScanner(){
+  stopQrDetection();
+  if(qrStream){ qrStream.getTracks().forEach(t=>t.stop()); qrStream=null; }
+  document.getElementById('qr-scanner-overlay').classList.remove('open');
+}
+
+function setQrMode(mode){
+  qrMode = mode;
+  document.getElementById('qr-tab-mov').className = mode==='movimiento' ? 'qr-tab-active' : 'qr-tab-inactive';
+  document.getElementById('qr-tab-info').className = mode==='info' ? 'qr-tab-active' : 'qr-tab-inactive';
+}
+
+// ── Detección QR con BarcodeDetector (nativo Android Chrome) ──
+function startQrDetection(){
+  if(!('BarcodeDetector' in window)){
+    // Fallback: usar el canvas manualmente con jsQR
+    startQrFallback();
+    return;
+  }
+  const detector = new BarcodeDetector({ formats:['qr_code'] });
+  const video = document.getElementById('qr-video');
+  const detect = async () => {
+    if(qrWorking){ qrAnimId=requestAnimationFrame(detect); return; }
+    try {
+      const codes = await detector.detect(video);
+      if(codes.length > 0){
+        qrWorking = true;
+        handleQrResult(codes[0].rawValue);
+        return;
+      }
+    } catch(e){}
+    qrAnimId = requestAnimationFrame(detect);
+  };
+  qrAnimId = requestAnimationFrame(detect);
+}
+
+function startQrFallback(){
+  // Canvas + jsQR library loaded lazily
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+  script.onload = ()=>{
+    const video = document.getElementById('qr-video');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const tick = () => {
+      if(qrWorking) return;
+      if(video.readyState === video.HAVE_ENOUGH_DATA){
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+        const code = window.jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts:'dontInvert' });
+        if(code){ qrWorking=true; handleQrResult(code.data); return; }
+      }
+      qrAnimId = requestAnimationFrame(tick);
+    };
+    qrAnimId = requestAnimationFrame(tick);
+  };
+  document.head.appendChild(script);
+}
+
+function stopQrDetection(){
+  if(qrAnimId){ cancelAnimationFrame(qrAnimId); qrAnimId=null; }
+  qrWorking = false;
+}
+
+// ── Procesar resultado del QR ──
+async function handleQrResult(raw){
+  if(navigator.vibrate) navigator.vibrate([50,30,50]);
+  document.getElementById('qr-status').textContent = '✓ Código leído — ' + raw.substring(0,40);
+
+  let payload;
+  try { payload = JSON.parse(raw); } catch(e) { payload = { type:'unknown', raw }; }
+
+  closeQrScanner();
+
+  const [mats, ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
+
+  if(payload.type === 'material'){
+    const mat = mats.find(m=>m.id===payload.id);
+    if(mat){
+      if(qrMode==='info') showQrInfo('material', mat, ubics);
+      else showQrMovimiento(mat, ubics);
+    } else {
+      toast('Material no encontrado en la base de datos local','error');
+    }
+  } else if(payload.type === 'ubicacion'){
+    const ubic = ubics.find(u=>u.id===payload.id);
+    if(ubic){
+      if(qrMode==='info') showQrUbicInfo(ubic, mats);
+      else showQrUbicMovimiento(ubic, mats);
+    } else {
+      toast('Ubicación no encontrada','error');
+    }
+  } else {
+    toast('QR no reconocido: ' + raw.substring(0,60), 'error');
+  }
+}
+
+// ── Mostrar info de material ──
+async function showQrInfo(type, mat, ubics){
+  const ub = ubics.find(u=>u.id===mat.ubicacionId);
+  const canP = hasPermiso('verPrecios');
+  document.getElementById('qra-title').textContent = mat.nombre;
+  document.getElementById('qra-desc').textContent = (ub?(ub.tipo==='furgoneta'?'🚐 ':'🏭 ')+ub.nombre:'Sin ubicación');
+  document.getElementById('qra-body').innerHTML = `
+    <div style="background:var(--bg3);border-radius:var(--rs);padding:12px;margin-bottom:12px;">
+      <div class="wiz-field-row"><span class="lbl">Stock actual</span><span class="val" style="font-size:18px;color:${mat.cantidad<=0?'var(--danger)':mat.cantidad<=(mat.minimo||0)?'var(--warn)':'var(--success)'}">${mat.cantidad} ${mat.unidad||'ud'}</span></div>
+      ${mat.referencia?`<div class="wiz-field-row"><span class="lbl">Referencia</span><span class="val">${mat.referencia}</span></div>`:''}
+      ${mat.proveedor?`<div class="wiz-field-row"><span class="lbl">Proveedor</span><span class="val">${mat.proveedor}</span></div>`:''}
+      ${canP&&mat.precio?`<div class="wiz-field-row"><span class="lbl">Precio</span><span class="val" style="color:var(--gold);">${mat.precio.toFixed(2)} €/ud</span></div>`:''}
+      ${mat.minimo?`<div class="wiz-field-row"><span class="lbl">Stock mínimo</span><span class="val">${mat.minimo}</span></div>`:''}
+      ${mat.descripcion?`<div class="wiz-field-row"><span class="lbl">Descripción</span><span class="val" style="font-size:12px;">${mat.descripcion}</span></div>`:''}
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-success" onclick="closeQrSheet();wizStart('entrada');wizAcceptValue(${JSON.stringify(mat)});">↑ Entrada</button>
+      <button class="btn btn-danger" onclick="closeQrSheet();wizStart('salida');wizAcceptValue(${JSON.stringify(mat)});">↓ Salida</button>
+    </div>`;
+  document.getElementById('qr-action-sheet').classList.add('open');
+}
+
+// ── Mostrar info de ubicación ──
+async function showQrUbicInfo(ubic, mats){
+  const matsEnUbic = mats.filter(m=>m.ubicacionId===ubic.id);
+  const icon = ubic.tipo==='furgoneta'?'🚐':ubic.tipo==='almacen'?'🏭':ubic.tipo==='obra'?'🏗️':'📍';
+  document.getElementById('qra-title').textContent = icon + ' ' + ubic.nombre;
+  document.getElementById('qra-desc').textContent = ubic.descripcion || ubic.tipo;
+  document.getElementById('qra-body').innerHTML = `
+    <div style="background:var(--bg3);border-radius:var(--rs);padding:12px;margin-bottom:12px;">
+      ${ubic.direccion?`<div class="wiz-field-row"><span class="lbl">Dirección</span><span class="val">${ubic.direccion}</span></div>`:''}
+      <div class="wiz-field-row"><span class="lbl">Materiales</span><span class="val">${matsEnUbic.length}</span></div>
+    </div>
+    ${matsEnUbic.length?`<p style="font-size:11px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px;">Contenido:</p>
+    <div style="max-height:200px;overflow-y:auto;">
+    ${matsEnUbic.map(m=>`<div class="wiz-field-row"><span>${m.nombre}</span><span class="val" style="color:${m.cantidad<=0?'var(--danger)':m.cantidad<=(m.minimo||0)?'var(--warn)':'var(--success)'}">${m.cantidad} ${m.unidad||'ud'}</span></div>`).join('')}
+    </div>`:'<p style="font-size:13px;color:var(--text3);">No hay materiales en esta ubicación</p>'}
+    <div style="margin-top:12px;">
+      <button class="btn btn-secondary" onclick="closeQrSheet();">Cerrar</button>
+    </div>`;
+  document.getElementById('qr-action-sheet').classList.add('open');
+}
+
+// ── Escanear material → iniciar movimiento con ubicación preseleccionada ──
+async function showQrMovimiento(mat, ubics){
+  const ub = ubics.find(u=>u.id===mat.ubicacionId);
+  document.getElementById('qra-title').textContent = '📦 ' + mat.nombre;
+  document.getElementById('qra-desc').textContent = `Stock: ${mat.cantidad} ${mat.unidad||'ud'} ${ub?'· '+(ub.tipo==='furgoneta'?'🚐 ':'🏭 ')+ub.nombre:''}`;
+  document.getElementById('qra-body').innerHTML = `
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">¿Qué quieres registrar?</p>
+    <div class="btn-row" style="margin-bottom:8px;">
+      <button class="btn btn-success" onclick="closeQrSheet();qrStartMovimiento('entrada',${JSON.stringify(mat)})">↑ Entrada</button>
+      <button class="btn btn-danger" onclick="closeQrSheet();qrStartMovimiento('salida',${JSON.stringify(mat)})">↓ Salida</button>
+    </div>
+    <button class="btn btn-secondary" onclick="closeQrSheet();qrStartMovimiento('mover',${JSON.stringify(mat)})">⇄ Mover a otra ubicación</button>`;
+  document.getElementById('qr-action-sheet').classList.add('open');
+}
+
+// ── Escanear ubicación → ver contenido + acción ──
+async function showQrUbicMovimiento(ubic, mats){
+  const icon = ubic.tipo==='furgoneta'?'🚐':ubic.tipo==='almacen'?'🏭':'📍';
+  document.getElementById('qra-title').textContent = icon + ' ' + ubic.nombre;
+  document.getElementById('qra-desc').textContent = ubic.descripcion || 'Elige qué hacer';
+  const matsEnUbic = mats.filter(m=>m.ubicacionId===ubic.id).slice(0,8);
+  document.getElementById('qra-body').innerHTML = `
+    <p style="font-size:13px;color:var(--text2);margin-bottom:10px;">¿Qué material entra o sale de esta ubicación?</p>
+    ${matsEnUbic.length?`<div style="max-height:140px;overflow-y:auto;margin-bottom:10px;">`+
+      matsEnUbic.map(m=>`<div class="wiz-field-row" style="cursor:pointer;padding:8px 4px;" onclick="closeQrSheet();showQrMovimiento(${JSON.stringify(m)},${JSON.stringify(mats.filter(x=>x.ubicacionId===ubic.id))})">
+        <span>${m.nombre}</span><span class="val" style="color:${m.cantidad<=(m.minimo||0)?'var(--warn)':'var(--success)'}">${m.cantidad} ${m.unidad||'ud'}</span>
+      </div>`).join('')+`</div>`:``}
+    <button class="btn btn-primary" onclick="closeQrSheet();wizStart('entrada');wizSkipToField('ubicacion',${JSON.stringify(ubic)})">↑ Registrar entrada aquí</button>
+    <button class="btn btn-secondary" onclick="closeQrSheet()">Cerrar</button>`;
+  document.getElementById('qr-action-sheet').classList.add('open');
+}
+
+function closeQrSheet(){
+  document.getElementById('qr-action-sheet').classList.remove('open');
+}
+
+// ── Iniciar asistente de voz con material preseleccionado ──
+async function qrStartMovimiento(tipo, mat){
+  await wizStart(tipo);
+  // Saltar directamente al paso material (índice 1) con el material ya seleccionado
+  // El asistente empieza por cantidad
+  // Primero pedimos la cantidad con un diálogo rápido
+  const cantStr = prompt(`¿Cuántas unidades de "${mat.nombre}"? (stock actual: ${mat.cantidad} ${mat.unidad||'ud'})`, '1');
+  const cant = parseFloat(cantStr);
+  if(!cant || cant<=0){ wizCancel(); return; }
+  wizAcceptValue(cant);       // acepta cantidad
+  setTimeout(()=>{ wizAcceptValue(mat); }, 300); // acepta material
+}
+
+// ── Saltar a campo de ubicación con valor preseleccionado ──
+function wizSkipToField(fieldKey, value){
+  const idx = WIZ.steps.findIndex(s=>s.key===fieldKey);
+  if(idx<0) return;
+  // Rellenar pasos anteriores si los hay
+  for(let i=0;i<idx;i++){
+    if(WIZ.data[WIZ.steps[i].key]===undefined) WIZ.data[WIZ.steps[i].key]=null;
+  }
+  WIZ.stepIdx = idx;
+  wizAcceptValue(value);
+}
+
+// ══════════════════════════════════════════════
+// QR — GENERACIÓN Y ETIQUETAS
+// ══════════════════════════════════════════════
+let labelsType = 'materiales';
+
+async function openQrLabels(){
+  labelsTab = 'materiales';
+  document.querySelectorAll('#qr-labels-modal .tab').forEach((t,i)=>t.classList.toggle('active',i===0));
+  await renderLabelsList();
+  document.getElementById('qr-labels-modal').classList.add('open');
+}
+
+async function setLabelsTab(type){
+  labelsTab = type;
+  document.querySelectorAll('#qr-labels-modal .tab').forEach((t,i)=>t.classList.toggle('active',['materiales','ubicaciones'][i]===type));
+  await renderLabelsList();
+}
+
+async function renderLabelsList(){
+  const q = norm(document.getElementById('labels-search')?.value||'');
+  labelsData = labelsTab==='materiales' ? await dbGetAll('materiales') : await dbGetAll('ubicaciones');
+  const filtered = q ? labelsData.filter(item=>norm(item.nombre).includes(q)) : labelsData;
+  const el = document.getElementById('labels-list');
+  el.innerHTML = filtered.map((item,i)=>`
+    <div class="label-card">
+      <input type="checkbox" id="lbl-${i}" value="${item.id}" checked>
+      <div class="label-card-info">
+        <h4>${item.nombre}</h4>
+        <p>${labelsTab==='materiales'?(item.unidad||'ud')+' · '+(item.proveedor||'—'):(item.tipo||'')+' · '+(item.direccion||'—')}</p>
+      </div>
+    </div>`).join('');
+}
+
+function selectAllLabels(val){
+  document.querySelectorAll('#labels-list input[type=checkbox]').forEach(cb=>cb.checked=val);
+}
+
+async function printLabels(){
+  // Cargar QRCode.js si no está
+  if(!window.QRCode){
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+      s.onload=res; s.onerror=rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb=>parseInt(cb.value));
+  const items = labelsData.filter(item=>checked.includes(item.id));
+  if(!items.length){ toast('Selecciona al menos una etiqueta','error'); return; }
+
+  const cols = parseInt(document.getElementById('label-cols').value)||2;
+  const sizeMm = parseInt(document.getElementById('label-size').value)||60;
+  const sizePx = sizeMm*3.78; // mm a px aprox 96dpi
+
+  const printArea = document.getElementById('print-label-area');
+  printArea.innerHTML = '';
+
+  const ubics = await dbGetAll('ubicaciones');
+  const ubicMap = {}; ubics.forEach(u=>ubicMap[u.id]=u);
+
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;padding:8px;`;
+
+  for(const item of items){
+    const payload = JSON.stringify({
+      type: labelsTab==='materiales'?'material':'ubicacion',
+      id: item.id,
+      nombre: item.nombre
+    });
+
+    const div = document.createElement('div');
+    div.className = 'print-label';
+    div.style.cssText = `width:${sizeMm}mm;padding:3mm;border:1px solid #ccc;border-radius:2mm;font-family:Arial,sans-serif;box-sizing:border-box;page-break-inside:avoid;background:#fff;`;
+
+    const icon = labelsTab==='ubicaciones'?(item.tipo==='furgoneta'?'🚐':item.tipo==='almacen'?'🏭':'📍'):'📦';
+    let subtitle = '';
+    if(labelsTab==='materiales'){
+      const ub=ubicMap[item.ubicacionId];
+      subtitle=[(ub?ub.nombre:''), item.referencia||'', item.unidad||''].filter(Boolean).join(' · ');
+    } else {
+      subtitle=[item.tipo||'', item.direccion||''].filter(Boolean).join(' · ');
+    }
+
+    div.innerHTML = `
+      <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
+      ${subtitle?`<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>`:''}
+      <canvas id="qrc-${item.id}" style="display:block;margin:0 auto;"></canvas>
+      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.id}</div>`;
+
+    wrapper.appendChild(div);
+  }
+  printArea.appendChild(wrapper);
+
+  // Generar QRs
+  for(const item of items){
+    const payload = JSON.stringify({ type:labelsTab==='materiales'?'material':'ubicacion', id:item.id, nombre:item.nombre });
+    const canvas = printArea.querySelector(`#qrc-${item.id}`);
+    if(canvas){
+      try{
+        await QRCode.toCanvas(canvas, payload, {
+          width: Math.min(sizePx*0.55, 120),
+          margin:1,
+          color:{ dark:'#1a1a2e', light:'#ffffff' }
+        });
+      }catch(e){ console.error('QR error',e); }
+    }
+  }
+
+  closeModal('qr-labels-modal');
+  setTimeout(()=>window.print(), 300);
+}
+
+// ── Botón flotante QR desde inventario ──
+function showScreen_orig(name){ } // placeholder - overridden below
 
 function posGps(id) { 
     if (navigator.geolocation) {
