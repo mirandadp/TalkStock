@@ -1782,7 +1782,7 @@ async function printLabels(){
     div.innerHTML = `
       <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
       ${subtitle?`<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>`:''}
-      <canvas id="qrc-${item.id}" style="display:block;margin:0 auto;"></canvas>
+      <div id="qrc-${item.id}" style="display:block;margin:0 auto;"></div>
       <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.id}</div>`;
 
     wrapper.appendChild(div);
