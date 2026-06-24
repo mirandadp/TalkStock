@@ -295,7 +295,7 @@ function copySetupSQL() {
 let syncTimer;
 function scheduleSyncSoon() { if (!SB) return; clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 1800); }
 
-/ ══════════════════════════════════════════════
+// ══════════════════════════════════════════════
 // VOZ
 // ══════════════════════════════════════════════
 // ══════════════════════════════════════════════
