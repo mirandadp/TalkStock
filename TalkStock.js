@@ -20,10 +20,10 @@ const ROLES = {
         cls: 'role-operario',
         emoji: '👷'
     },
-     lector_presencia: { 
-        label:'Lector Presencia', 
-        color:'#9b59b6',
-        cls:'role-lector', emoji:'📋' 
+    lector_presencia: {
+        label: 'Lector Presencia',
+        color: '#9b59b6',
+        cls: 'role-lector', emoji: '📋'
     }
 };
 const CAN = {
@@ -35,7 +35,7 @@ const CAN = {
     gestionAdmin: r => r === 'admin',
     editarMaterial: r => r === 'admin' || r === 'encargado',
     editarUbicacion: r => r === 'admin' || r === 'encargado',
-    verFichajes: r => r==='admin' || r==='lector_presencia',
+    verFichajes: r => r === 'admin' || r === 'lector_presencia',
 };
 
 let currentUser = null;
@@ -82,9 +82,9 @@ function fmtDate(d) {
 // ══════════════════════════════════════════════
 let db;
 const DB_NAME = 'StockVozDB'
-  , DB_VER = 6;
+    , DB_VER = 6;
 function initDB() {
-    return new Promise( (res, rej) => {
+    return new Promise((res, rej) => {
         const req = indexedDB.open(DB_NAME, DB_VER);
         req.onupgradeneeded = e => {
             const d = e.target.result;
@@ -97,21 +97,21 @@ function initDB() {
             }
             );
         }
-        ;
+            ;
         req.onsuccess = e => {
             db = e.target.result;
             res(db);
         }
-        ;
+            ;
         req.onerror = () => rej(req.error);
     }
     );
 }
 function dbTx(store, mode, fn) {
-    return new Promise( (res, rej) => {
+    return new Promise((res, rej) => {
         const tx = db.transaction(store, mode)
-          , s = tx.objectStore(store)
-          , req = fn(s);
+            , s = tx.objectStore(store)
+            , req = fn(s);
         req.onsuccess = () => res(req.result);
         req.onerror = () => rej(req.error);
     }
@@ -159,7 +159,7 @@ async function initLogin() {
                 doLogin(u);
                 return;
             }
-        } catch (e) {}
+        } catch (e) { }
     }
 }
 async function createFirstAdmin() {
@@ -187,7 +187,7 @@ async function createFirstAdmin() {
     toast('✓ Administrador creado', 'success');
     document.getElementById('first-setup').style.display = 'none';
     document.getElementById('user-select-wrap').style.display = 'block';
-    setTimeout( () => initLogin(), 500);
+    setTimeout(() => initLogin(), 500);
 }
 function onUserSelect() {
     const id = parseInt(document.getElementById('login-user-sel').value);
@@ -258,9 +258,9 @@ function doLogin(u) {
     document.getElementById('app').style.display = 'flex';
     updateTopbarUser();
     applyRoleUI();
-     if(currentUser.rol==='lector_presencia'){
-         showScreen('fichaje'); return;
-       }
+    if (currentUser.rol === 'lector_presencia') {
+        showScreen('fichaje'); return;
+    }
     renderAll();
     if (initSupabase()) {
         startRealtime();
@@ -297,7 +297,7 @@ function applyRoleUI() {
     const rol = currentUser.rol;
     document.getElementById('nav-ped').style.display = CAN.verPedidos(rol) ? '' : 'none';
     document.getElementById('nav-admin').style.display = CAN.gestionAdmin(rol) ? '' : 'none';
-     document.getElementById('nav-fichaje').style.display =(CAN.verFichajes(rol)) ? '' : 'none';
+    document.getElementById('nav-fichaje').style.display = (CAN.verFichajes(rol)) ? '' : 'none';
     const opPedir = document.getElementById('op-pedir');
     if (opPedir)
         opPedir.style.display = CAN.crearPedidos(rol) ? '' : 'none';
@@ -335,15 +335,15 @@ function showChangePinModal() {
         toast('✓ PIN actualizado', 'success');
         scheduleSyncSoon();
     }
-    , 'Guardar');
+        , 'Guardar');
 }
 
 // ══════════════════════════════════════════════
 // SUPABASE SYNC
 // ══════════════════════════════════════════════
 let SB = null
-  , rtChannel = null
-  , syncBusy = false;
+    , rtChannel = null
+    , syncBusy = false;
 
 const SETUP_SQL = `-- StockVoz — SQL para Supabase (pega y ejecuta en SQL Editor)
 
@@ -352,17 +352,24 @@ create table if not exists materiales(id uuid primary key default gen_random_uui
 create table if not exists movimientos(id uuid primary key default gen_random_uuid(),local_id integer,tipo text not null,cantidad numeric not null,material_id uuid references materiales(id),ubicacion_id uuid references ubicaciones(id),fecha timestamptz default now(),usuario text,nota text,created_at timestamptz default now());
 create table if not exists usuarios(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,rol text default 'operario',pin text,creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists pedidos(id uuid primary key default gen_random_uuid(),local_id integer,proveedor text,estado text default 'pendiente',notas text,lineas jsonb,total numeric default 0,creado_por text,modificado_por text,modificado_en timestamptz,fecha timestamptz default now(),updated_at timestamptz default now());
+create table if not exists fichajes(id uuid primary key default gen_random_uuid(),local_id integer,user_id integer,nombre_usuario text,rol_usuario text,tipo text not null,fecha timestamptz not null,fecha_local text,creado_por text,dispositivo text,nota text,created_at timestamptz default now());
+
+
 
 create or replace function update_updated_at() returns trigger as $$ begin new.updated_at=now();return new;end;$$ language plpgsql;
 do $$ declare t text;begin foreach t in array array['ubicaciones','materiales','usuarios','pedidos'] loop execute format('drop trigger if exists trg_%s_upd on %s;create trigger trg_%s_upd before update on %s for each row execute function update_updated_at();',t,t,t,t);end loop;end$$;
 
 alter table ubicaciones enable row level security;alter table materiales enable row level security;alter table movimientos enable row level security;alter table usuarios enable row level security;alter table pedidos enable row level security;
+alter table fichajes enable row level security;create policy public_all on fichajes for all using(true) with check(true);
 do $$ declare t text;begin foreach t in array array['ubicaciones','materiales','movimientos','usuarios','pedidos'] loop if not exists(select 1 from pg_policies where tablename=t and policyname='public_all') then execute format('create policy public_all on %s for all using(true) with check(true)',t);end if;end loop;end$$;
+
 
 alter publication supabase_realtime add table movimientos;
 alter publication supabase_realtime add table materiales;
 alter publication supabase_realtime add table pedidos;
-alter publication supabase_realtime add table ubicaciones;`.trim();
+alter publication supabase_realtime add table ubicaciones;
+alter publication supabase_realtime add table fichajes;
+`.trim();
 
 function getSBConfig() {
     return {
@@ -371,7 +378,7 @@ function getSBConfig() {
     };
 }
 function initSupabase() {
-    const {url, key} = getSBConfig();
+    const { url, key } = getSBConfig();
     if (!url || !key)
         return false;
     try {
@@ -395,9 +402,9 @@ async function syncNow() {
         return;
     syncBusy = true;
     try {
-        const [ubics,mats,movs,users,peds] = await Promise.all([dbGetAll('ubicaciones'), dbGetAll('materiales'), dbGetAll('movimientos'), dbGetAll('usuarios'), dbGetAll('pedidos')]);
+        const [ubics, mats, movs, users, peds] = await Promise.all([dbGetAll('ubicaciones'), dbGetAll('materiales'), dbGetAll('movimientos'), dbGetAll('usuarios'), dbGetAll('pedidos')]);
         for (const u of ubics.filter(x => !x.synced)) {
-            const {data, error} = await SB.from('ubicaciones').upsert({
+            const { data, error } = await SB.from('ubicaciones').upsert({
                 nombre: u.nombre,
                 tipo: u.tipo,
                 direccion: u.direccion || '',
@@ -419,7 +426,7 @@ async function syncNow() {
         const ubicsSynced = await dbGetAll('ubicaciones');
         for (const m of mats.filter(x => !x.synced)) {
             const ub = ubicsSynced.find(u => u.id === m.ubicacionId);
-            const {data, error} = await SB.from('materiales').upsert({
+            const { data, error } = await SB.from('materiales').upsert({
                 nombre: m.nombre,
                 cantidad: m.cantidad,
                 unidad: m.unidad || 'ud',
@@ -448,7 +455,7 @@ async function syncNow() {
         for (const mv of movs.filter(x => !x.synced)) {
             const mt = matsSynced.find(m => m.id === mv.materialId);
             const ub = ubicsSynced.find(u => u.id === mv.ubicacionId);
-            const {data, error} = await SB.from('movimientos').upsert({
+            const { data, error } = await SB.from('movimientos').upsert({
                 tipo: mv.tipo,
                 cantidad: mv.cantidad,
                 nota: mv.nota || '',
@@ -468,7 +475,7 @@ async function syncNow() {
             }
         }
         for (const u of users.filter(x => !x.synced)) {
-            const {data, error} = await SB.from('usuarios').upsert({
+            const { data, error } = await SB.from('usuarios').upsert({
                 nombre: u.nombre,
                 rol: u.rol,
                 pin: u.pin,
@@ -487,7 +494,7 @@ async function syncNow() {
             }
         }
         for (const p of peds.filter(x => !x.synced)) {
-            const {data, error} = await SB.from('pedidos').upsert({
+            const { data, error } = await SB.from('pedidos').upsert({
                 proveedor: p.proveedor || '',
                 estado: p.estado,
                 notas: p.notas || '',
@@ -507,6 +514,27 @@ async function syncNow() {
                 await dbPut('pedidos', p);
             }
         }
+        const fichs = await dbGetAll('fichajes');
+        for (const f of fichs.filter(x => !x.sinc)) {
+            const { error } = await SB.from('fichajes').upsert({
+                local_id: f.id,
+                user_id: f.userId,
+                nombre_usuario: f.nombreUsuario,
+                rol_usuario: f.rolUsuario,
+                tipo: f.tipo,
+                fecha: f.fecha,
+                fecha_local: f.fechaLocal,
+                creado_por: f.creadoPor,
+                dispositivo: f.dispositivo,
+                nota: f.nota || ''
+            }, { onConflict: 'local_id' });
+            if (!error) {
+                f.sinc = 1;
+                f.remote_id = data.id;
+                await dbPut('fichajes', f);
+            }
+        }
+
         if (pushed > 0)
             toast(`☁️ ${pushed} movimientos subidos`, 'success');
         await pullRemoteData();
@@ -525,14 +553,14 @@ async function pullRemoteData() {
     const lastPull = localStorage.getItem('last_pull') || '1970-01-01T00:00:00Z';
     try {
         const pull = async (table, localStore, merge) => {
-            const {data} = await SB.from(table).select('*').gt('updated_at', lastPull);
+            const { data } = await SB.from(table).select('*').gt('updated_at', lastPull);
             if (data?.length) {
                 const local = await dbGetAll(localStore);
                 for (const r of data)
                     await merge(r, local);
             }
         }
-        ;
+            ;
         await pull('ubicaciones', 'ubicaciones', async (ru, local) => {
             const ex = local.find(u => u.remote_id === ru.id || (u.id === ru.local_id && ru.nombre === u.nombre));
             if (ex) {
@@ -608,7 +636,7 @@ async function pullRemoteData() {
         }
         );
         const matsSynced = await dbGetAll('materiales');
-        const {data: rMv} = await SB.from('movimientos').select('*').gt('created_at', lastPull);
+        const { data: rMv } = await SB.from('movimientos').select('*').gt('created_at', lastPull);
         if (rMv?.length) {
             const lmv = await dbGetAll('movimientos');
             for (const rm of rMv) {
@@ -748,7 +776,7 @@ function stopRealtime() {
 }
 function saveSupabaseConfig() {
     const url = document.getElementById('sb-url').value.trim()
-      , key = document.getElementById('sb-key').value.trim();
+        , key = document.getElementById('sb-key').value.trim();
     if (!url || !key) {
         toast('Rellena URL y API Key', 'error');
         return;
@@ -778,16 +806,16 @@ function clearSupabaseConfig() {
     );
 }
 function renderSyncScreen() {
-    const {url, key} = getSBConfig();
+    const { url, key } = getSBConfig();
     const c = !!(url && key);
     const ue = document.getElementById('sb-url')
-      , ke = document.getElementById('sb-key');
+        , ke = document.getElementById('sb-key');
     if (ue)
         ue.value = '';
     if (ke)
         ke.value = '';
     const ce = document.getElementById('sb-connected')
-      , fe = document.getElementById('sb-form');
+        , fe = document.getElementById('sb-form');
     if (ce)
         ce.style.display = c ? 'block' : 'none';
     if (fe)
@@ -797,7 +825,7 @@ function renderSyncScreen() {
         su.textContent = url;
 }
 function copySetupSQL() {
-    navigator.clipboard.writeText(SETUP_SQL).then( () => toast('✓ SQL copiado', 'success')).catch( () => {
+    navigator.clipboard.writeText(SETUP_SQL).then(() => toast('✓ SQL copiado', 'success')).catch(() => {
         const ta = document.createElement('textarea');
         ta.value = SETUP_SQL;
         document.body.appendChild(ta);
@@ -823,7 +851,7 @@ function scheduleSyncSoon() {
 // VOZ — ASISTENTE GUIADO PASO A PASO
 // ══════════════════════════════════════════════
 let recognition = null
-  , isRecording = false;
+    , isRecording = false;
 
 // Estado del asistente
 const WIZ = {
@@ -998,7 +1026,7 @@ function initVoice() {
 
     recognition.onresult = e => {
         let interim = ''
-          , final = '';
+            , final = '';
         for (let i = e.resultIndex; i < e.results.length; i++) {
             const t = e.results[i][0].transcript;
             if (e.results[i].isFinal)
@@ -1011,7 +1039,7 @@ function initVoice() {
         if (final)
             wizProcessSpeech(final.trim());
     }
-    ;
+        ;
     recognition.onerror = e => {
         stopListening();
         if (e.error === 'no-speech')
@@ -1019,7 +1047,7 @@ function initVoice() {
         else if (e.error === 'not-allowed')
             toast('Micrófono no permitido — actívalo en el navegador', 'error');
     }
-    ;
+        ;
     recognition.onend = () => stopListening();
 }
 
@@ -1049,7 +1077,7 @@ function stopListening() {
     if (recognition && isRecording)
         try {
             recognition.stop();
-        } catch (e) {}
+        } catch (e) { }
     isRecording = false;
     document.querySelectorAll('.mic-btn,.mic-btn-sm').forEach(b => b.classList.remove('recording'));
     const lbl = document.getElementById('micBtnStepLabel');
@@ -1064,7 +1092,7 @@ function updateWizVoiceText(text, interim) {
     el.textContent = (interim ? '🎙️ ' : '') + text + (interim ? '…' : '');
     el.classList.toggle('wiz-voice-active', true);
     if (!interim)
-        setTimeout( () => el.classList.remove('wiz-voice-active'), 1000);
+        setTimeout(() => el.classList.remove('wiz-voice-active'), 1000);
 }
 
 // ── Escucha para selección de tipo en pantalla idle ──
@@ -1175,7 +1203,7 @@ async function wizProcessSpeech(text) {
         const m = t.match(/(\d+(?:[.,]\d+)?)/);
         let num = m ? parseFloat(m[1].replace(',', '.')) : null;
         if (!num) {
-            for (const [w,v] of Object.entries(words)) {
+            for (const [w, v] of Object.entries(words)) {
                 if (t.includes(w)) {
                     num = v;
                     break;
@@ -1250,12 +1278,12 @@ async function wizProcessUbicacion(t) {
     updateWizVoiceText(`No encontré "${t}". Elige de la lista.`, false);
 }
 
-function showWizSuggestions(items, onSelect, highlight='') {
+function showWizSuggestions(items, onSelect, highlight = '') {
     const el = document.getElementById('wiz-suggestions');
     if (!el)
         return;
     el.style.display = 'block';
-    el.innerHTML = items.map( (item, i) => `<span class="sug-chip${highlight && norm(item.label).includes(norm(highlight)) ? ' match' : ''}" onclick="wizSugClick(${i})">${item.label}</span>`).join('');
+    el.innerHTML = items.map((item, i) => `<span class="sug-chip${highlight && norm(item.label).includes(norm(highlight)) ? ' match' : ''}" onclick="wizSugClick(${i})">${item.label}</span>`).join('');
     el._items = items;
     el._onSelect = onSelect;
 }
@@ -1288,7 +1316,7 @@ async function wizStart(tipo) {
 
     wizRenderStep();
     // Arrancar escucha automáticamente para el primer paso
-    setTimeout( () => wizListenStep(), 400);
+    setTimeout(() => wizListenStep(), 400);
     speak(WIZ.steps[0]?.label ? 'Di ' + WIZ.steps[0].label : '');
 }
 
@@ -1299,7 +1327,7 @@ function wizRenderStep() {
 
     // Progress dots
     const prog = document.getElementById('wiz-progress');
-    prog.innerHTML = WIZ.steps.map( (s, i) => `<div class="wiz-dot ${i < WIZ.stepIdx ? 'done' : i === WIZ.stepIdx ? 'active' : 'pending'}"></div>`).join('');
+    prog.innerHTML = WIZ.steps.map((s, i) => `<div class="wiz-dot ${i < WIZ.stepIdx ? 'done' : i === WIZ.stepIdx ? 'active' : 'pending'}"></div>`).join('');
 
     // Resumen de campos ya completados
     const summary = document.getElementById('wiz-summary');
@@ -1370,13 +1398,13 @@ function wizAcceptValue(value) {
     const displayVal = typeof value === 'object' ? (value.nombre || '?') : String(value);
     updateWizVoiceText('✓ ' + displayVal, false);
 
-    setTimeout( () => {
+    setTimeout(() => {
         wizRenderStep();
         if (WIZ.stepIdx < WIZ.steps.length) {
-            setTimeout( () => wizListenStep(), 350);
+            setTimeout(() => wizListenStep(), 350);
         }
     }
-    , 600);
+        , 600);
 }
 
 function wizSkipStep() {
@@ -1387,7 +1415,7 @@ function wizSkipStep() {
     WIZ.stepIdx++;
     wizRenderStep();
     if (WIZ.stepIdx < WIZ.steps.length)
-        setTimeout( () => wizListenStep(), 350);
+        setTimeout(() => wizListenStep(), 350);
 }
 
 function wizToggleManual() {
@@ -1484,13 +1512,13 @@ function wizShowConfirm() {
     speak('Todo listo. Di ok para confirmar.');
 
     // Escuchar "ok" automáticamente
-    setTimeout( () => startListening('micBtnStep', 'micBtnStepLabel'), 600);
+    setTimeout(() => startListening('micBtnStep', 'micBtnStepLabel'), 600);
 }
 
 // ── Ejecutar la operación final ──
 async function wizExecute() {
     stopListening();
-    const {tipo, data} = WIZ;
+    const { tipo, data } = WIZ;
 
     if (tipo === 'buscar') {
         await wizDoSearch(data.material);
@@ -1664,7 +1692,7 @@ function speak(text) {
         utter.pitch = 1;
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utter);
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // ── Búsqueda de materiales desde la pantalla de inventario ──
@@ -1705,8 +1733,8 @@ async function registerMovement(matId, tipo, cantidad, ubicId, destUbicId, nota)
 // PEDIDOS
 // ══════════════════════════════════════════════
 let currentPedTab = 'pendiente'
-  , pedLines = []
-  , editingPedidoId = null;
+    , pedLines = []
+    , editingPedidoId = null;
 async function openNewPedido() {
     editingPedidoId = null;
     pedLines = [{
@@ -1741,9 +1769,9 @@ async function openEditPedido(id) {
 }
 async function renderPedLines() {
     const mats = await dbGetAll('materiales')
-      , canP = hasPermiso('verPrecios');
+        , canP = hasPermiso('verPrecios');
     const el = document.getElementById('ped-lines');
-    el.innerHTML = pedLines.map( (l, i) => `
+    el.innerHTML = pedLines.map((l, i) => `
     <div style="background:var(--bg3);border-radius:var(--rs);padding:10px;margin-bottom:8px;">
       <div class="form-group" style="margin-bottom:6px;">
         <select onchange="pedLineMatChange(${i},this.value)" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:8px;color:var(--text);font-size:13px;">
@@ -1765,7 +1793,7 @@ async function renderPedLines() {
 
 async function pedLineMatChange(i, matId) {
     const mats = await dbGetAll('materiales')
-      , mat = mats.find(m => m.id === parseInt(matId));
+        , mat = mats.find(m => m.id === parseInt(matId));
     if (mat) {
         pedLines[i].materialId = mat.id;
         pedLines[i].nombre = mat.nombre;
@@ -1799,20 +1827,20 @@ function addPedLine() {
     renderPedLines();
 }
 function updatePedTotal() {
-    const t = pedLines.reduce( (s, l) => s + l.subtotal, 0);
+    const t = pedLines.reduce((s, l) => s + l.subtotal, 0);
     const el = document.getElementById('ped-total');
     if (el)
         el.textContent = t.toFixed(2) + ' €';
 }
 async function savePedido() {
     const prov = document.getElementById('ped-proveedor').value.trim()
-      , notas = document.getElementById('ped-notas').value.trim();
+        , notas = document.getElementById('ped-notas').value.trim();
     const validLines = pedLines.filter(l => l.materialId && l.cantidad > 0);
     if (!validLines.length) {
         toast('Añade al menos un material', 'error');
         return;
     }
-    const total = validLines.reduce( (s, l) => s + l.subtotal, 0);
+    const total = validLines.reduce((s, l) => s + l.subtotal, 0);
     const now = new Date().toISOString();
     if (editingPedidoId) {
         const peds = await dbGetAll('pedidos');
@@ -1849,7 +1877,7 @@ async function savePedido() {
 }
 function setPedTab(tab) {
     currentPedTab = tab;
-    document.querySelectorAll('#screen-ped .tab').forEach( (t, i) => t.classList.toggle('active', ['pendiente', 'aprobado', 'recibido'][i] === tab));
+    document.querySelectorAll('#screen-ped .tab').forEach((t, i) => t.classList.toggle('active', ['pendiente', 'aprobado', 'recibido'][i] === tab));
     renderPedidos();
 }
 async function renderPedidos() {
@@ -1863,8 +1891,8 @@ async function renderPedidos() {
     const peds = await dbGetAll('pedidos');
     const filtered = peds.filter(p => p.estado === currentPedTab).reverse();
     const canP = hasPermiso('verPrecios')
-      , canAprobar = hasPermiso('aprobarPedidos')
-      , canEditar = hasPermiso('editarPedidos');
+        , canAprobar = hasPermiso('aprobarPedidos')
+        , canEditar = hasPermiso('editarPedidos');
     const el = document.getElementById('pedidosList');
     if (!filtered.length) {
         el.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg><p>No hay pedidos ${currentPedTab === 'pendiente' ? 'pendientes' : currentPedTab === 'aprobado' ? 'aprobados' : 'recibidos'}</p></div>`;
@@ -1905,7 +1933,7 @@ async function renderPedidos() {
 }
 async function cambiarEstadoPedido(id, nuevoEstado) {
     const peds = await dbGetAll('pedidos')
-      , ped = peds.find(p => p.id === id);
+        , ped = peds.find(p => p.id === id);
     if (!ped)
         return;
     if (nuevoEstado === 'recibido' && ped.lineas?.length) {
@@ -1913,7 +1941,7 @@ async function cambiarEstadoPedido(id, nuevoEstado) {
             if (!l.materialId)
                 continue;
             const mats = await dbGetAll('materiales')
-              , mat = mats.find(m => m.id === l.materialId);
+                , mat = mats.find(m => m.id === l.materialId);
             if (mat) {
                 mat.cantidad = (mat.cantidad || 0) + l.cantidad;
                 Object.assign(mat, auditStamp());
@@ -1940,13 +1968,13 @@ async function cambiarEstadoPedido(id, nuevoEstado) {
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════
 let currentMovTab = 'all'
-  , currentAdminTab = 'mat';
+    , currentAdminTab = 'mat';
 async function renderAll() {
     await Promise.all([renderInventory(), renderMovements(), renderAdmin(), renderPedidos(), updateStats()]);
 }
 
 async function renderInventory() {
-    const [mats,ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
+    const [mats, ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
     const ubicMap = {};
     ubics.forEach(u => ubicMap[u.id] = u);
     const sel = document.getElementById('filterUbic');
@@ -1959,13 +1987,13 @@ async function renderInventory() {
 }
 async function filterInventory(mats, ubics, ubicMap) {
     if (!mats) {
-        [mats,ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
+        [mats, ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
         ubicMap = {};
         ubics.forEach(u => ubicMap[u.id] = u);
     }
     const q = norm(document.getElementById('searchInput')?.value || '')
-      , fU = document.getElementById('filterUbic')?.value
-      , canP = hasPermiso('verPrecios');
+        , fU = document.getElementById('filterUbic')?.value
+        , canP = hasPermiso('verPrecios');
     let f = mats;
     if (q)
         f = f.filter(m => norm(m.nombre).includes(q) || norm(m.proveedor || '').includes(q));
@@ -2011,9 +2039,9 @@ async function filterInventory(mats, ubics, ubicMap) {
 }
 
 async function renderMovements() {
-    const [movs,mats,ubics] = await Promise.all([dbGetAll('movimientos'), dbGetAll('materiales'), dbGetAll('ubicaciones')]);
+    const [movs, mats, ubics] = await Promise.all([dbGetAll('movimientos'), dbGetAll('materiales'), dbGetAll('ubicaciones')]);
     const matMap = {}
-      , ubicMap = {};
+        , ubicMap = {};
     mats.forEach(m => matMap[m.id] = m);
     ubics.forEach(u => ubicMap[u.id] = u);
     let f = [...movs].reverse();
@@ -2028,8 +2056,8 @@ async function renderMovements() {
     }
     el.innerHTML = f.slice(0, 150).map(mv => {
         const mat = matMap[mv.materialId]
-          , ub = ubicMap[mv.ubicacionId]
-          , isIn = mv.tipo === 'entrada';
+            , ub = ubicMap[mv.ubicacionId]
+            , isIn = mv.tipo === 'entrada';
         return `<div class="mov-item">
       <div class="mov-icon ${isIn ? 'mov-in' : 'mov-out'}">${isIn ? '↑' : '↓'}</div>
       <div class="mov-info">
@@ -2046,7 +2074,7 @@ async function renderMovements() {
 async function renderAdmin() {
     if (!hasPermiso('gestionAdmin')) {
         const lk = document.getElementById('lock-admin')
-          , ac = document.getElementById('admin-content');
+            , ac = document.getElementById('admin-content');
         if (lk)
             lk.style.display = 'flex';
         if (ac)
@@ -2054,12 +2082,12 @@ async function renderAdmin() {
         return;
     }
     const lk = document.getElementById('lock-admin')
-      , ac = document.getElementById('admin-content');
+        , ac = document.getElementById('admin-content');
     if (lk)
         lk.style.display = 'none';
     if (ac)
         ac.style.display = 'block';
-    const [mats,ubics,users] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones'), dbGetAll('usuarios')]);
+    const [mats, ubics, users] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones'), dbGetAll('usuarios')]);
     const ubicMap = {};
     ubics.forEach(u => ubicMap[u.id] = u);
     // Mat list
@@ -2067,7 +2095,7 @@ async function renderAdmin() {
     if (ml)
         ml.innerHTML = mats.length ? mats.map(m => {
             const ub = ubicMap[m.ubicacionId]
-              , audit = fmtAudit(m);
+                , audit = fmtAudit(m);
             return `<div class="item-card" style="margin-bottom:8px;">
       <div class="item-card-row">
         <div class="item-info">
@@ -2116,7 +2144,7 @@ async function renderAdmin() {
     if (userList)
         userList.innerHTML = users.map(u => {
             const r = ROLES[u.rol]
-              , audit = fmtAudit(u);
+                , audit = fmtAudit(u);
             return `<div class="user-card">
       <div class="user-card-row">
         <div class="user-avatar" style="background:${r.color}22;color:${r.color};">${u.nombre.charAt(0).toUpperCase()}</div>
@@ -2136,7 +2164,7 @@ async function renderAdmin() {
 }
 
 async function updateStats() {
-    const [mats,ubics,movs] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones'), dbGetAll('movimientos')]);
+    const [mats, ubics, movs] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones'), dbGetAll('movimientos')]);
     const g = id => document.getElementById(id);
     if (g('statMat'))
         g('statMat').textContent = mats.length;
@@ -2163,7 +2191,7 @@ async function updateSyncBadge() {
 // ══════════════════════════════════════════════
 async function editMaterial(id) {
     const mats = await dbGetAll('materiales')
-      , m = mats.find(x => x.id === id);
+        , m = mats.find(x => x.id === id);
     if (!m)
         return;
     const ubics = await dbGetAll('ubicaciones');
@@ -2210,7 +2238,7 @@ async function editMaterial(id) {
         renderAll();
         scheduleSyncSoon();
     }
-    ;
+        ;
     document.getElementById('editModal').classList.add('open');
 }
 
@@ -2219,7 +2247,7 @@ async function editMaterial(id) {
 // ══════════════════════════════════════════════
 async function editUbicacion(id) {
     const ubics = await dbGetAll('ubicaciones')
-      , u = ubics.find(x => x.id === id);
+        , u = ubics.find(x => x.id === id);
     if (!u)
         return;
     document.getElementById('editModalTitle').textContent = 'Editar Ubicación';
@@ -2250,7 +2278,7 @@ async function editUbicacion(id) {
         renderAll();
         scheduleSyncSoon();
     }
-    ;
+        ;
     document.getElementById('editModal').classList.add('open');
 }
 
@@ -2259,7 +2287,7 @@ async function editUbicacion(id) {
 // ══════════════════════════════════════════════
 async function editUser(id) {
     const users = await dbGetAll('usuarios')
-      , u = users.find(x => x.id === id);
+        , u = users.find(x => x.id === id);
     if (!u)
         return;
     document.getElementById('editModalTitle').textContent = 'Editar Usuario';
@@ -2304,7 +2332,7 @@ async function editUser(id) {
         renderAdmin();
         scheduleSyncSoon();
     }
-    ;
+        ;
     document.getElementById('editModal').classList.add('open');
 }
 
@@ -2447,14 +2475,14 @@ async function deleteUbicacion(id) {
 }
 
 async function exportCSV(tipo) {
-    const [mats,ubics,movs,peds] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones'), dbGetAll('movimientos'), dbGetAll('pedidos')]);
+    const [mats, ubics, movs, peds] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones'), dbGetAll('movimientos'), dbGetAll('pedidos')]);
     const matMap = {}
-      , ubicMap = {};
+        , ubicMap = {};
     mats.forEach(m => matMap[m.id] = m);
     ubics.forEach(u => ubicMap[u.id] = u);
     const canP = hasPermiso('verPrecios');
     let csv = ''
-      , fn = '';
+        , fn = '';
     if (tipo === 'inventario' || tipo === 'todo') {
         csv += 'INVENTARIO\nID,Nombre,Referencia,Cantidad,Unidad,Precio (€),Proveedor,Ubicación,Stock Mínimo,Descripción,Creado por,Modificado por,Modificado en\n';
         csv += mats.map(m => [m.id, `"${m.nombre}"`, `"${m.referencia || ''}"`, m.cantidad, m.unidad || 'ud', canP ? m.precio || 0 : '***', `"${m.proveedor || ''}"`, `"${ubicMap[m.ubicacionId]?.nombre || ''}"`, m.minimo || 0, `"${m.descripcion || ''}"`, `"${m.creadoPor || ''}"`, `"${m.modificadoPor || ''}"`, m.modificadoEn || ''].join(',')).join('\n') + '\n\n';
@@ -2480,7 +2508,7 @@ async function exportCSV(tipo) {
     }
     if (tipo === 'todo')
         fn = 'stockvoz_completo.csv';
-    const blob = new Blob(['\uFEFF' + csv],{
+    const blob = new Blob(['\uFEFF' + csv], {
         type: 'text/csv;charset=utf-8;'
     });
     const url = URL.createObjectURL(blob);
@@ -2597,7 +2625,7 @@ async function loadSampleData() {
             proveedor: 'Materiales López',
             referencia: 'ML-H25',
             descripcion: 'CEM II/B-L 32,5 N'
-        }, ];
+        },];
         for (const m of samples) {
             const id = await dbAdd('materiales', {
                 ...m,
@@ -2670,12 +2698,12 @@ function showScreen(name) {
         renderAdmin();
         updateStats();
     } else if (name === 'qr') {/* QR screen rendered statically */
-    }else if(name==='fichaje') renderFichaje();
+    } else if (name === 'fichaje') renderFichaje();
 }
 
 function setMovTab(tab) {
     currentMovTab = tab;
-    document.querySelectorAll('#screen-mov .tab').forEach( (t, i) => t.classList.toggle('active', ['all', 'entrada', 'salida'][i] === tab));
+    document.querySelectorAll('#screen-mov .tab').forEach((t, i) => t.classList.toggle('active', ['all', 'entrada', 'salida'][i] === tab));
     renderMovements();
 }
 
@@ -2687,14 +2715,14 @@ function setAdminTab(tab) {
             el.style.display = t === tab ? 'block' : 'none';
     }
     );
-    document.querySelectorAll('#screen-admin .tabs .tab').forEach( (t, i) => t.classList.toggle('active', ['mat', 'ubic', 'users', 'sync', 'export'][i] === tab));
+    document.querySelectorAll('#screen-admin .tabs .tab').forEach((t, i) => t.classList.toggle('active', ['mat', 'ubic', 'users', 'sync', 'export'][i] === tab));
     if (tab === 'sync')
         renderSyncScreen();
     else if (tab !== 'mat')
         renderAdmin();
 }
 
-function showConfirmModal(title, body, onConfirm, confirmLabel='Confirmar') {
+function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
     document.getElementById('confirmTitle').textContent = title;
     document.getElementById('confirmBody').innerHTML = body;
     document.getElementById('confirmBtn').textContent = confirmLabel;
@@ -2702,7 +2730,7 @@ function showConfirmModal(title, body, onConfirm, confirmLabel='Confirmar') {
         closeModal('confirmModal');
         onConfirm();
     }
-    ;
+        ;
     document.getElementById('confirmModal').classList.add('open');
 }
 function closeModal(id) {
@@ -2710,12 +2738,12 @@ function closeModal(id) {
 }
 
 let toastTimer;
-function toast(msg, type='') {
+function toast(msg, type = '') {
     const el = document.getElementById('toast');
     el.textContent = msg;
     el.className = 'show ' + type;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout( () => el.className = '', 3000);
+    toastTimer = setTimeout(() => el.className = '', 3000);
 }
 
 function updateNetStatus() {
@@ -2741,8 +2769,8 @@ window.addEventListener('offline', updateNetStatus);
     await initDB();
     initVoice();
     await initLogin();
-    if ('serviceWorker'in navigator)
-        navigator.serviceWorker.register('sw.js').catch( () => {}
+    if ('serviceWorker' in navigator)
+        navigator.serviceWorker.register('sw.js').catch(() => { }
         );
 }
 )();
@@ -2751,11 +2779,11 @@ window.addEventListener('offline', updateNetStatus);
 // QR — ESCÁNER Y ETIQUETAS
 // ══════════════════════════════════════════════
 let qrStream = null
-  , qrWorking = false
-  , qrMode = 'movimiento'
-  , qrAnimId = null;
+    , qrWorking = false
+    , qrMode = 'movimiento'
+    , qrAnimId = null;
 let labelsTab = 'materiales'
-  , labelsData = [];
+    , labelsData = [];
 
 // ── Abrir escáner ──
 async function openQrScanner(mode) {
@@ -2803,7 +2831,7 @@ function setQrMode(mode) {
 
 // ── Detección QR con BarcodeDetector (nativo Android Chrome) ──
 function startQrDetection() {
-    if (!('BarcodeDetector'in window)) {
+    if (!('BarcodeDetector' in window)) {
         // Fallback: usar el canvas manualmente con jsQR
         startQrFallback();
         return;
@@ -2824,10 +2852,10 @@ function startQrDetection() {
                 handleQrResult(codes[0].rawValue);
                 return;
             }
-        } catch (e) {}
+        } catch (e) { }
         qrAnimId = requestAnimationFrame(detect);
     }
-    ;
+        ;
     qrAnimId = requestAnimationFrame(detect);
 }
 
@@ -2858,10 +2886,10 @@ function startQrFallback() {
             }
             qrAnimId = requestAnimationFrame(tick);
         }
-        ;
+            ;
         qrAnimId = requestAnimationFrame(tick);
     }
-    ;
+        ;
     document.head.appendChild(script);
 }
 
@@ -2891,7 +2919,7 @@ async function handleQrResult(raw) {
 
     closeQrScanner();
 
-    const [mats,ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
+    const [mats, ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
 
     if (payload.type === 'material') {
         const mat = mats.find(m => m.id === payload.id);
@@ -3010,10 +3038,10 @@ async function qrStartMovimiento(tipo, mat) {
     }
     wizAcceptValue(cant);
     // acepta cantidad
-    setTimeout( () => {
+    setTimeout(() => {
         wizAcceptValue(mat);
     }
-    , 300);
+        , 300);
     // acepta material
 }
 
@@ -3038,14 +3066,14 @@ let labelsType = 'materiales';
 
 async function openQrLabels() {
     labelsTab = 'materiales';
-    document.querySelectorAll('#qr-labels-modal .tab').forEach( (t, i) => t.classList.toggle('active', i === 0));
+    document.querySelectorAll('#qr-labels-modal .tab').forEach((t, i) => t.classList.toggle('active', i === 0));
     await renderLabelsList();
     document.getElementById('qr-labels-modal').classList.add('open');
 }
 
 async function setLabelsTab(type) {
     labelsTab = type;
-    document.querySelectorAll('#qr-labels-modal .tab').forEach( (t, i) => t.classList.toggle('active', ['materiales', 'ubicaciones'][i] === type));
+    document.querySelectorAll('#qr-labels-modal .tab').forEach((t, i) => t.classList.toggle('active', ['materiales', 'ubicaciones'][i] === type));
     await renderLabelsList();
 }
 
@@ -3054,7 +3082,7 @@ async function renderLabelsList() {
     labelsData = labelsTab === 'materiales' ? await dbGetAll('materiales') : await dbGetAll('ubicaciones');
     const filtered = q ? labelsData.filter(item => norm(item.nombre).includes(q)) : labelsData;
     const el = document.getElementById('labels-list');
-    el.innerHTML = filtered.map( (item, i) => `
+    el.innerHTML = filtered.map((item, i) => `
     <div class="label-card">
       <input type="checkbox" id="lbl-${i}" value="${item.id}" checked>
       <div class="label-card-info">
@@ -3071,7 +3099,7 @@ function selectAllLabels(val) {
 async function printLabels() {
     // Cargar QRCode.js si no está
     if (!window.QRCode) {
-        await new Promise( (res, rej) => {
+        await new Promise((res, rej) => {
             const s = document.createElement('script');
             s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
             s.onload = res;
@@ -3143,7 +3171,7 @@ async function printLabels() {
         const canvas = printArea.querySelector(`#qrc-${item.id}`);
         if (canvas) {
             try {
-                var qrc = new QRCode(canvas,{
+                var qrc = new QRCode(canvas, {
                     width: Math.min(sizePx * 0.55, 120),
                     height: Math.min(sizePx * 0.55, 120)
                 })
@@ -3160,34 +3188,34 @@ async function printLabels() {
     }
 
     closeModal('qr-labels-modal');
-    setTimeout( () => window.print(), 300);
+    setTimeout(() => window.print(), 300);
 }
 
 // ── Botón flotante QR desde inventario ──
-function showScreen_orig(name) {}
+function showScreen_orig(name) { }
 // placeholder - overridden below
 
 function posGps(id) {
     if (navigator.geolocation) {
         var domPosLon = document.getElementById('gpslongitud');
         var domPosLat = document.getElementById('gpslatitud');
-        navigator.geolocation.getCurrentPosition( (position) => {
+        navigator.geolocation.getCurrentPosition((position) => {
             //var txt = "Latitud: " + position.coords.latitude + "\nLongitud: " + position.coords.longitude;
             domPosLon.innerHTML = position.coords.longitude;
             domPosLat.innerHTML = position.coords.latitude;
         }
-        , (error) => {
-            domPosLon.innerHTML = "Error al obtener la ubicación: " + error.message;
-            domPosLat.innerHTML = "Error al obtener la ubicación: " + error.message;
-            //console.error("Error al obtener la ubicación: " + error.message);
-        }
-        , {
-            enableHighAccuracy: true,
-            // Prioriza el uso del GPS
-            timeout: 5000,
-            // Tiempo máximo de espera
-            maximumAge: 0 // No usar datos cacheados
-        });
+            , (error) => {
+                domPosLon.innerHTML = "Error al obtener la ubicación: " + error.message;
+                domPosLat.innerHTML = "Error al obtener la ubicación: " + error.message;
+                //console.error("Error al obtener la ubicación: " + error.message);
+            }
+            , {
+                enableHighAccuracy: true,
+                // Prioriza el uso del GPS
+                timeout: 5000,
+                // Tiempo máximo de espera
+                maximumAge: 0 // No usar datos cacheados
+            });
     } else {
         console.error("Geolocalización no soportada por este navegador.");
     }
