@@ -402,7 +402,7 @@ async function syncNow() {
         return;
     syncBusy = true;
     try {
-        const [ubics, mats, movs, users, peds] = await Promise.all([dbGetAll('ubicaciones'), dbGetAll('materiales'), dbGetAll('movimientos'), dbGetAll('usuarios'), dbGetAll('pedidos')]);
+        const [ubics, mats, movs, users, peds, fichs] = await Promise.all([dbGetAll('ubicaciones'), dbGetAll('materiales'), dbGetAll('movimientos'), dbGetAll('usuarios'), dbGetAll('pedidos'), dbGetAll('fichajes')]);
         for (const u of ubics.filter(x => !x.synced)) {
             const { data, error } = await SB.from('ubicaciones').upsert({
                 nombre: u.nombre,
@@ -514,9 +514,8 @@ async function syncNow() {
                 await dbPut('pedidos', p);
             }
         }
-        const fichs = await dbGetAll('fichajes');
-        for (const f of fichs.filter(x => !x.sinc)) {
-            const {data, error } = await SB.from('fichajes').upsert({
+        for (const f of fichs.filter(x => !x.synced)) {
+            const { data, error } = await SB.from('fichajes').upsert({
                 local_id: f.id,
                 user_id: f.userId,
                 nombre_usuario: f.nombreUsuario,
@@ -527,9 +526,11 @@ async function syncNow() {
                 creado_por: f.creadoPor,
                 dispositivo: f.dispositivo,
                 nota: f.nota || ''
-            }, { onConflict: 'local_id' });
-            if (!error) {
-                f.sinc = 1;
+            }, {
+                onConflict: 'local_id'
+            });
+            if (!error && data) {
+                f.synced = 1;
                 f.remote_id = data.id;
                 await dbPut('fichajes', f);
             }
