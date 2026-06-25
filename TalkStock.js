@@ -516,7 +516,7 @@ async function syncNow() {
         }
         const fichs = await dbGetAll('fichajes');
         for (const f of fichs.filter(x => !x.sinc)) {
-            const { error } = await SB.from('fichajes').upsert({
+            const {data, error } = await SB.from('fichajes').upsert({
                 local_id: f.id,
                 user_id: f.userId,
                 nombre_usuario: f.nombreUsuario,
