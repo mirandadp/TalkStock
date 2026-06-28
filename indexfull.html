@@ -742,7 +742,7 @@ function hasPermiso(perm){ return currentUser && CAN[perm]?.(currentUser.rol); }
 // INDEXEDDB
 // ══════════════════════════════════════════════
 let db;
-const DB_NAME='StockVozDB', DB_VER=4;
+const DB_NAME='StockVozDB', DB_VER=6;
 
 function initDB(){
   return new Promise((res,rej)=>{
