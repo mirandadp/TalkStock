@@ -139,6 +139,11 @@ async function initLogin() {
     if (!usuarios.length) {
         document.getElementById('user-select-wrap').style.display = 'none';
         document.getElementById('first-setup').style.display = 'block';
+
+                var fe = document.getElementById('sb-form');
+        fe.style.display = 'block';
+
+
         return;
     }
     const sel = document.getElementById('login-user-sel');
