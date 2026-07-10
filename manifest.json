@@ -1,8 +1,8 @@
 {
   "name": "StockVoz - Gestión de Material",
   "short_name": "StockVoz",
-  "description": "Gestión de material por voz, offline, multi-usuario",
-  "start_url": "/",
+  "description": "Gestión de material por voz (Whisper local), offline, multi-usuario",
+  "start_url": "/app.html",
   "display": "standalone",
   "background_color": "#0f0f1a",
   "theme_color": "#1a1a2e",
@@ -14,7 +14,7 @@
   ],
   "categories": ["business", "productivity", "utilities"],
   "shortcuts": [
-    { "name": "Control por Voz", "url": "/?screen=voz", "description": "Ir directamente al control por voz" },
-    { "name": "Ver Stock", "url": "/?screen=inv", "description": "Ver inventario" }
+    { "name": "Control por Voz", "url": "/app.html?screen=voz", "description": "Ir directamente al control por voz" },
+    { "name": "Ver Stock", "url": "/app.html?screen=inv", "description": "Ver inventario" }
   ]
 }

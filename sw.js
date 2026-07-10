@@ -1,7 +1,10 @@
-const CACHE = 'stockvoz-v1';
+const CACHE = 'stockvoz-v2';
 const ASSETS = [
   '/',
-  '/index.html'
+  '/app.html',
+  '/app.css',
+  '/app.js',
+  '/manifest.json'
 ];
 
 self.addEventListener('install', e => {
@@ -18,8 +21,19 @@ self.addEventListener('activate', e => {
   );
 });
 
+// Estrategia: cache-first para nuestros propios archivos (mismo origen).
+// Las peticiones al CDN de transformers.js / modelo Whisper (jsdelivr)
+// las gestiona la propia librería con su caché interna (Cache Storage API,
+// env.useBrowserCache=true), por lo que aquí simplemente las dejamos pasar
+// sin interferir, para no duplicar la caché de varios GB del modelo.
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+
+  const url = new URL(e.request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+
+  if (!isSameOrigin) return; // deja pasar CDN externo (jsdelivr) sin interceptar
+
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
@@ -29,7 +43,7 @@ self.addEventListener('fetch', e => {
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => caches.match('/index.html'));
+      }).catch(() => caches.match('/app.html'));
     })
   );
 });
