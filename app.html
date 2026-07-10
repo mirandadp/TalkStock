@@ -10,9 +10,6 @@
 <title>StockVoz</title>
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="app.css">
-<script type="module">
-    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-</script>
 </head>
 <body>
 
@@ -20,7 +17,7 @@
 <div id="login-screen">
   <div class="login-logo">📦</div>
   <div class="login-title">StockVoz</div>
-  <div class="login-sub">Gestión de material por voz 4</div>
+  <div class="login-sub">Gestión de material por voz</div>
   <div class="login-card">
 
     <!-- Comprobando estado inicial (spinner breve) -->
@@ -797,5 +794,6 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="app.js"></script>
+<script src="qrcode.min.js"></script>
 </body>
 </html>

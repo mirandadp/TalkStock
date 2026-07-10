@@ -619,60 +619,115 @@ const TIPO_META = {
 
 function norm(s) { return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim(); }
 
-function normalizeVoiceText(text) {
-    const base = norm(text);
-    if (!base) return '';
+// ══════════════════════════════════════════════
+// CORRECCIÓN DE VOZ — normalización fonética y numérica
+// Whisper confunde con frecuencia b/v, s/z/c, y a veces
+// transcribe números como palabras en vez de dígitos.
+// Estas funciones corrigen ambos problemas antes de
+// interpretar el texto reconocido.
+// ══════════════════════════════════════════════
 
-    const aliases = {
-        'tuvo': 'tubo',
-        'tubos': 'tubo',
-        'tubo': 'tubo',
-        'tub': 'tubo'
-    };
-
-    return base.split(/\s+/).map(token => aliases[token] || token).join(' ');
+// Clave fonética: reduce un texto a su "sonido" aproximado en español,
+// para que "tuvo" y "tubo" (o "codo"/"codo") generen la misma clave
+// aunque Whisper haya transcrito una letra por otra.
+function phoneticKey(s) {
+    let t = norm(s);
+    t = t
+        .replace(/[bv]/g, 'b')        // b/v suenan igual en español
+        .replace(/z/g, 's')           // z suena como s (seseo)
+        .replace(/c(?=[ei])/g, 's')   // "ce/ci" suena como s
+        .replace(/qu/g, 'k')
+        .replace(/c(?=[aou])/g, 'k')  // "ca/co/cu" suena como k
+        .replace(/h/g, '')            // h muda
+        .replace(/ll/g, 'y')
+        .replace(/rr/g, 'r')
+        .replace(/[^a-z0-9]/g, '');   // fuera espacios y puntuación para comparar el núcleo
+    return t;
 }
 
-function extractVoiceNumber(text) {
-    const t = normalizeVoiceText(text);
-    if (!t) return null;
-
-    const m = t.match(/(\d+(?:[.,]\d+)?)/);
-    if (m) return parseFloat(m[1].replace(',', '.'));
-
-    const words = {
-        'cero': 0,
-        'uno': 1, 'una': 1,
-        'dos': 2,
-        'tres': 3,
-        'cuatro': 4,
-        'cinco': 5,
-        'seis': 6,
-        'siete': 7,
-        'ocho': 8,
-        'nueve': 9,
-        'diez': 10,
-        'dies': 10,
-        'once': 11,
-        'doce': 12,
-        'trece': 13,
-        'catorce': 14,
-        'quince': 15,
-        'veinte': 20,
-        'treinta': 30,
-        'cuarenta': 40,
-        'cincuenta': 50,
-        'cien': 100,
-        'ciento': 100,
-        'doscientos': 200,
-        'quinientos': 500,
-        'mil': 1000
-    };
-
-    for (const [w, v] of Object.entries(words)) {
-        if (t.includes(w)) return v;
+// Distancia de Levenshtein (nº mínimo de ediciones entre dos cadenas)
+function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    const dp = [];
+    for (let i = 0; i <= m; i++) { dp.push(new Array(n + 1).fill(0)); dp[i][0] = i; }
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+        }
     }
-    return null;
+    return dp[m][n];
+}
+
+// ¿Coinciden dos textos aunque Whisper haya transcrito alguna letra mal?
+// Compara por clave fonética y tolera pequeñas diferencias (distancia de edición).
+function fuzzyMatch(a, b) {
+    const ka = phoneticKey(a), kb = phoneticKey(b);
+    if (!ka || !kb) return false;
+    if (ka === kb) return true;
+    if (ka.length >= 3 && kb.length >= 3 && (ka.includes(kb) || kb.includes(ka))) return true;
+    const dist = levenshtein(ka, kb);
+    const maxLen = Math.max(ka.length, kb.length);
+    return dist <= Math.max(1, Math.floor(maxLen * 0.28));
+}
+
+// Puntuación de similitud (0 a 1) para ordenar varios candidatos por parecido
+function fuzzyScore(a, b) {
+    const ka = phoneticKey(a), kb = phoneticKey(b);
+    if (!ka || !kb) return 0;
+    if (ka === kb) return 1;
+    const dist = levenshtein(ka, kb);
+    const maxLen = Math.max(ka.length, kb.length);
+    return 1 - dist / maxLen;
+}
+
+// ── Números en palabras (español) → dígitos ──
+const NUM_UNITS = {
+    cero: 0, uno: 1, un: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
+    diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19,
+    veinte: 20, veintiuno: 21, veintidos: 22, veintitres: 23, veinticuatro: 24, veinticinco: 25, veintiseis: 26, veintisiete: 27, veintiocho: 28, veintinueve: 29
+};
+const NUM_TENS = { treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60, setenta: 70, ochenta: 80, noventa: 90 };
+const NUM_HUNDREDS = { cien: 100, ciento: 100, doscientos: 200, trescientos: 300, cuatrocientos: 400, quinientos: 500, seiscientos: 600, setecientos: 700, ochocientos: 800, novecientos: 900 };
+
+// Convierte una secuencia de palabras numéricas en español a su valor entero.
+// Soporta compuestos: "cuarenta y cinco" → 45, "ciento diez" → 110, "dos mil" → 2000.
+// IMPORTANTE: exige que TODAS las palabras del segmento sean numéricas — si aparece
+// una palabra ajena (ej. "tubo" en "tubo noventa"), se rechaza el segmento entero
+// para no "comerse" el nombre del material al convertir el número.
+function parseSpanishNumberWords(text) {
+    const words = norm(text).split(/\s+/).filter(w => w && w !== 'y');
+    if (!words.length) return null;
+    let total = 0, current = 0;
+    for (const w of words) {
+        if (w === 'mil') { current = (current || 1) * 1000; total += current; current = 0; continue; }
+        if (NUM_HUNDREDS[w] !== undefined) { current += NUM_HUNDREDS[w]; continue; }
+        if (NUM_TENS[w] !== undefined) { current += NUM_TENS[w]; continue; }
+        if (NUM_UNITS[w] !== undefined) { current += NUM_UNITS[w]; continue; }
+        return null; // palabra no numérica en el segmento → todo el segmento no es válido
+    }
+    total += current;
+    return total > 0 ? total : null;
+}
+
+// Busca, dentro de un texto, el primer tramo de palabras que forme un número
+// hablado y lo sustituye por su valor en dígitos. Si el texto ya trae dígitos,
+// se deja tal cual. Ej: "tubo noventa" → "tubo 90", "codo cuarenta y cinco" → "codo 45".
+function normalizeNumbersInText(text) {
+    if (/\d/.test(text)) return text;
+    const words = text.trim().split(/\s+/);
+    for (let start = 0; start < words.length; start++) {
+        // probar de más largo a más corto para capturar compuestos como "cuarenta y cinco"
+        for (let end = words.length; end > start; end--) {
+            const segment = words.slice(start, end).join(' ');
+            const val = parseSpanishNumberWords(segment);
+            if (val !== null && val > 0) {
+                return [...words.slice(0, start), String(val), ...words.slice(end)].join(' ');
+            }
+        }
+    }
+    return text;
 }
 
 // ══════════════════════════════════════════════
@@ -717,11 +772,9 @@ async function ensureWhisperLoaded(onProgress) {
         const { pipeline, env } = mod;
         env.allowLocalModels = false;
         env.useBrowserCache = true; // cachea el modelo tras la primera descarga → funciona offline después
-        //tiny|base|small
         whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
-           progress_callback: p => { if (onProgress) onProgress(p); }
+            progress_callback: p => { if (onProgress) onProgress(p); }
         });
-        
         whisperReady = true;
     } catch (e) {
         console.error('Error cargando Whisper local:', e);
@@ -830,7 +883,7 @@ async function finishRecording() {
     updateWizVoiceText('🧠 Transcribiendo…', true);
 
     try {
-        const audioBlob = await blobToWhisperInput(blob);
+        const float32 = await blobToWhisperInput(blob);
         const pipe = await ensureWhisperLoaded(p => {
             if (p && p.status === 'progress') {
                 const pct = Math.round(p.progress || 0);
@@ -839,21 +892,17 @@ async function finishRecording() {
         });
         if (!pipe) { updateWizVoiceText('No se pudo cargar el reconocimiento de voz', 'false'); return; }
 
-        // 3. El "prompt" mágico. Pon ejemplos de lo que sueles dictar
-        const miGlosario = "tubo, brida, soldadura, acero, inoxidable, diámetro, longitud, pieza, lote, código, referencia, número, medida, cantidad 4, unidades 3, E1P1C1, E2P2C2, E3P3C3, E4P4C4, E5P5C5, E6P6C6, E7P7C7, E8P8C8, E9P9C9, E10P10C10, entrada, salida, mover, buscar, pedir,"+
-            "Tubo 45, tubo 90,tubo, Tubo de 45, tubo de 90, codo 45, tubo, codo, 10, 3, 5, 1, entrada, salida, E1P1C1, E2P2C2."
-        const result = await pipe(audioBlob, { 
-            language: 'spanish', 
-            task: 'transcribe', 
-            chunk_length_s: 15,
-            prompt: miGlosario,
-        });
-        const text = (result?.text || '').trim();
+        const result = await pipe(float32, { language: 'spanish', task: 'transcribe', chunk_length_s: 15 });
+        const rawText = (result?.text || '').trim();
 
-        if (!text) {
+        if (!rawText) {
             updateWizVoiceText('No se detectó voz clara — inténtalo de nuevo', false);
             return;
         }
+        // Corrige números dichos en palabras ("noventa"→90, "cuarenta y cinco"→45)
+        // antes de interpretar el texto, ya que muchos nombres de material los llevan
+        // (ej. "tubo 90", "codo 45").
+        const text = normalizeNumbersInText(rawText);
         updateWizVoiceText(text, false);
         wizProcessSpeech(text);
     } catch (e) {
@@ -909,7 +958,7 @@ function wizListenStep() {
 // ── Procesar lo que dijo el usuario ──
 async function wizProcessSpeech(text) {
     stopListening();
-    const t = normalizeVoiceText(text);
+    const t = norm(text);
 
     // Si aún no hay operación, detectar tipo
     if (!WIZ.tipo) {
@@ -942,8 +991,12 @@ async function wizProcessSpeech(text) {
     if (!step) return;
 
     if (step.type === 'number') {
-        const num = extractVoiceNumber(t);
-        if (num !== null && num >= 0) {
+        // Extraer número del texto: primero dígitos, si no hay, números en palabras
+        // (soporta compuestos como "cuarenta y cinco" → 45)
+        const m = t.match(/(\d+(?:[.,]\d+)?)/);
+        let num = m ? parseFloat(m[1].replace(',', '.')) : null;
+        if (!num) { num = parseSpanishNumberWords(t); }
+        if (num && num > 0) {
             wizAcceptValue(num);
         } else {
             updateWizVoiceText('No entendí el número. Di solo el número, por ejemplo: "50"', false);
@@ -957,26 +1010,49 @@ async function wizProcessSpeech(text) {
         await wizProcessUbicacion(t);
 
     } else if (step.type === 'text') {
-        // Texto libre — aceptar tal cual, con normalización de alias de voz
-        wizAcceptValue(normalizeVoiceText(text.trim()));
+        // Texto libre — aceptar tal cual
+        wizAcceptValue(text.trim());
     }
+}
+
+// Busca materiales tolerando errores de transcripción de Whisper
+// (b/v, s/z, números en palabras, etc.) mediante coincidencia fonética.
+function buscarMaterialesFuzzy(t) {
+    // 1) Coincidencia exacta o por substring normal (más fiable si aplica)
+    let found = WIZ.mats.filter(m => norm(m.nombre) === t || norm(m.nombre).includes(t) || t.includes(norm(m.nombre)));
+    if (found.length) return found;
+    // 2) Coincidencia fonética/difusa (tolera "tuvo" por "tubo", etc.)
+    const scored = WIZ.mats
+        .map(m => ({ m, score: fuzzyScore(t, m.nombre) }))
+        .filter(x => x.score >= 0.6 || fuzzyMatch(t, x.m.nombre))
+        .sort((a, b) => b.score - a.score);
+    return scored.map(x => x.m);
+}
+
+function buscarUbicacionesFuzzy(t) {
+    let found = WIZ.ubics.filter(u => norm(u.nombre) === t || norm(u.nombre).includes(t) || t.includes(norm(u.nombre)));
+    if (found.length) return found;
+    const scored = WIZ.ubics
+        .map(u => ({ u, score: fuzzyScore(t, u.nombre) }))
+        .filter(x => x.score >= 0.6 || fuzzyMatch(t, x.u.nombre))
+        .sort((a, b) => b.score - a.score);
+    return scored.map(x => x.u);
 }
 
 async function wizProcessMaterial(t) {
     if (!WIZ.mats.length) WIZ.mats = await dbGetAll('materiales');
-    const target = normalizeVoiceText(t);
-    const found = WIZ.mats.filter(m => norm(m.nombre).includes(target) || target.includes(norm(m.nombre)));
+    const found = buscarMaterialesFuzzy(t);
     if (found.length === 1) {
         wizAcceptValue(found[0]);
         return;
     }
     if (found.length > 1) {
-        showWizSuggestions(found.map(m => ({ label: m.nombre + (m.cantidad !== undefined ? ` (${m.cantidad} ${m.unidad || 'ud'})` : ''), value: m })), wizAcceptValue);
-        updateWizVoiceText(`Encontré ${found.length} materiales. Elige uno:`, false);
-        speak('Encontré varios materiales. Elige uno tocando la pantalla.');
+        showWizSuggestions(found.slice(0, 10).map(m => ({ label: m.nombre + (m.cantidad !== undefined ? ` (${m.cantidad} ${m.unidad || 'ud'})` : ''), value: m })), wizAcceptValue);
+        updateWizVoiceText(`Encontré ${found.length} materiales parecidos a "${t}". Elige uno:`, false);
+        speak('Encontré varios materiales parecidos. Elige uno tocando la pantalla.');
         return;
     }
-    // No encontrado — mostrar todos y permitir elección
+    // No encontrado ni por parecido — mostrar todos y permitir elección
     showWizSuggestions(WIZ.mats.slice(0, 30).map(m => ({ label: m.nombre, value: m })), wizAcceptValue, t);
     updateWizVoiceText(`No encontré "${t}". Elige de la lista o escríbelo.`, false);
     speak('No lo encontré. Elige de la lista o escríbelo manualmente.');
@@ -984,15 +1060,14 @@ async function wizProcessMaterial(t) {
 
 async function wizProcessUbicacion(t) {
     if (!WIZ.ubics.length) WIZ.ubics = await dbGetAll('ubicaciones');
-    const target = normalizeVoiceText(t);
-    const found = WIZ.ubics.filter(u => norm(u.nombre).includes(target) || target.includes(norm(u.nombre)));
+    const found = buscarUbicacionesFuzzy(t);
     if (found.length === 1) {
         wizAcceptValue(found[0]);
         return;
     }
     if (found.length > 1) {
-        showWizSuggestions(found.map(u => ({ label: (u.tipo === 'furgoneta' ? '🚐 ' : '🏭 ') + u.nombre + (u.descripcion ? ' — ' + u.descripcion.substring(0, 30) : ''), value: u })), wizAcceptValue);
-        updateWizVoiceText(`Encontré ${found.length} ubicaciones. Elige una:`, false);
+        showWizSuggestions(found.slice(0, 10).map(u => ({ label: (u.tipo === 'furgoneta' ? '🚐 ' : '🏭 ') + u.nombre + (u.descripcion ? ' — ' + u.descripcion.substring(0, 30) : ''), value: u })), wizAcceptValue);
+        updateWizVoiceText(`Encontré ${found.length} ubicaciones parecidas. Elige una:`, false);
         return;
     }
     showWizSuggestions(WIZ.ubics.map(u => ({ label: (u.tipo === 'furgoneta' ? '🚐 ' : '🏭 ') + u.nombre, value: u })), wizAcceptValue, t);
@@ -1262,7 +1337,16 @@ async function wizDoSearch(mat) {
     const query = typeof mat === 'object' ? mat.nombre : (mat || '');
     const q = norm(query);
     const mats = await dbGetAll('materiales');
-    const found = q ? mats.filter(m => norm(m.nombre).includes(q)) : mats;
+    let found = q ? mats.filter(m => norm(m.nombre).includes(q)) : mats;
+    // Si la búsqueda exacta no da resultados, probar coincidencia fonética/difusa
+    // (tolera errores de transcripción por voz como "tuvo" en vez de "tubo")
+    if (q && !found.length) {
+        found = mats
+            .map(m => ({ m, score: fuzzyScore(q, m.nombre) }))
+            .filter(x => x.score >= 0.55 || fuzzyMatch(q, x.m.nombre))
+            .sort((a, b) => b.score - a.score)
+            .map(x => x.m);
+    }
     const canP = hasPermiso('verPrecios');
     const el = document.getElementById('wiz-search-result');
     el.style.display = 'block';
@@ -1991,7 +2075,7 @@ function startQrDetection() {
 function startQrFallback() {
     // Canvas + jsQR library loaded lazily
     const script = document.createElement('script');
-    script.src = 'jsQR.min.js';
+    script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
     script.onload = () => {
         const video = document.getElementById('qr-video');
         const canvas = document.createElement('canvas');
@@ -2252,7 +2336,102 @@ async function printLabels() {
     if (!window.QRCode) {
         await new Promise((res, rej) => {
             const s = document.createElement('script');
-            s.src = 'qrcode.min.js';
+            s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+            s.onload = res;
+            s.onerror = rej;
+            document.head.appendChild(s);
+        }
+        );
+    }
+
+    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => parseInt(cb.value));
+    const items = labelsData.filter(item => checked.includes(item.id));
+    if (!items.length) {
+        toast('Selecciona al menos una etiqueta', 'error');
+        return;
+    }
+
+    const cols = parseInt(document.getElementById('label-cols').value) || 2;
+    const sizeMm = parseInt(document.getElementById('label-size').value) || 60;
+    const sizePx = sizeMm * 3.78;
+    // mm a px aprox 96dpi
+
+    const printArea = document.getElementById('print-label-area');
+    printArea.innerHTML = '';
+
+    const ubics = await dbGetAll('ubicaciones');
+    const ubicMap = {};
+    ubics.forEach(u => ubicMap[u.id] = u);
+
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;padding:8px;`;
+
+    for (const item of items) {
+        const payload = JSON.stringify({
+            type: labelsTab === 'materiales' ? 'material' : 'ubicacion',
+            id: item.id,
+            nombre: item.nombre
+        });
+
+        const div = document.createElement('div');
+        div.className = 'print-label';
+        div.style.cssText = `width:${sizeMm}mm;padding:3mm;border:1px solid #ccc;border-radius:2mm;font-family:Arial,sans-serif;box-sizing:border-box;page-break-inside:avoid;background:#fff;`;
+
+        const icon = labelsTab === 'ubicaciones' ? (item.tipo === 'furgoneta' ? '🚐' : item.tipo === 'almacen' ? '🏭' : '📍') : '📦';
+        let subtitle = '';
+        if (labelsTab === 'materiales') {
+            const ub = ubicMap[item.ubicacionId];
+            subtitle = [(ub ? ub.nombre : ''), item.referencia || '', item.unidad || ''].filter(Boolean).join(' · ');
+        } else {
+            subtitle = [item.tipo || '', item.direccion || ''].filter(Boolean).join(' · ');
+        }
+
+        div.innerHTML = `
+      <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
+      ${subtitle ? `<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>` : ''}
+      <div id="qrc-${item.id}" style="display:block;margin:0 auto;"></div>
+      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.id}</div>`;
+
+        wrapper.appendChild(div);
+    }
+    printArea.appendChild(wrapper);
+
+    // Generar QRs
+    for (const item of items) {
+        const payload = JSON.stringify({
+            type: labelsTab === 'materiales' ? 'material' : 'ubicacion',
+            id: item.id,
+            nombre: item.nombre
+        });
+        const canvas = printArea.querySelector(`#qrc-${item.id}`);
+        if (canvas) {
+            try {
+                var qrc = new QRCode(canvas, {
+                    width: Math.min(sizePx * 0.55, 120),
+                    height: Math.min(sizePx * 0.55, 120)
+                })
+                qrc.makeCode(payload);
+                // await QRCode.toCanvas(canvas, payload, {
+                //   width: Math.min(sizePx*0.55, 120),
+                //   margin:1,
+                //   color:{ dark:'#1a1a2e', light:'#ffffff' }
+                // });
+            } catch (e) {
+                console.error('QR error', e);
+            }
+        }
+    }
+
+    closeModal('qr-labels-modal');
+    setTimeout(() => window.print(), 300);
+}
+
+async function printLabels2() {
+    // Cargar QRCode.js si no está
+    if (!window.QRCode) {
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
             s.onload = res; s.onerror = rej;
             document.head.appendChild(s);
         });
