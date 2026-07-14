@@ -2788,8 +2788,94 @@ let qrStream = null
     , qrWorking = false
     , qrMode = 'movimiento'
     , qrAnimId = null;
+let qrCameraDevices = []
+    , qrSelectedDeviceId = null;
 let labelsTab = 'materiales'
     , labelsData = [];
+
+function getQrVideoConstraints() {
+    const base = {
+        width: {
+            ideal: 1280
+        },
+        height: {
+            ideal: 720
+        }
+    };
+    if (qrSelectedDeviceId) {
+        return {
+            video: {
+                ...base,
+                deviceId: {
+                    exact: qrSelectedDeviceId
+                }
+            }
+        };
+    }
+    return {
+        video: {
+            ...base,
+            facingMode: {
+                ideal: 'user'
+            }
+        }
+    };
+}
+
+async function populateQrCameraSelector() {
+    const select = document.getElementById('qr-camera-select');
+    if (!select || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices)
+        return;
+    try {
+        const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+        qrCameraDevices = devices;
+        if (!devices.length) {
+            select.innerHTML = '<option value="">Sin cámaras</option>';
+            select.style.display = 'none';
+            return;
+        }
+        select.innerHTML = '';
+        devices.forEach((device, index) => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = device.label || `Cámara ${index + 1}`;
+            select.appendChild(option);
+        });
+        const preferredDeviceId = qrSelectedDeviceId || devices.find(d => /front|frontal|user|self/i.test(d.label))?.deviceId || devices[0].deviceId;
+        qrSelectedDeviceId = preferredDeviceId;
+        select.value = preferredDeviceId;
+        select.style.display = 'inline-block';
+    } catch (e) {
+        select.style.display = 'none';
+    }
+}
+
+async function switchQrCamera(deviceId) {
+    if (!deviceId)
+        return;
+    qrSelectedDeviceId = deviceId;
+    const status = document.getElementById('qr-status');
+    if (status)
+        status.textContent = 'Cambiando cámara…';
+    stopQrDetection();
+    if (qrStream) {
+        qrStream.getTracks().forEach(track => track.stop());
+        qrStream = null;
+    }
+    try {
+        qrStream = await navigator.mediaDevices.getUserMedia(getQrVideoConstraints());
+        const video = document.getElementById('qr-video');
+        video.srcObject = qrStream;
+        await video.play();
+        qrWorking = false;
+        if (status)
+            status.textContent = 'Apunta la cámara al código QR';
+        startQrDetection();
+    } catch (e) {
+        if (status)
+            status.textContent = '⚠️ No se pudo cambiar a la cámara seleccionada: ' + e.message;
+    }
+}
 
 // ── Abrir escáner ──
 async function openQrScanner(mode) {
@@ -2798,20 +2884,11 @@ async function openQrScanner(mode) {
     document.getElementById('qr-scanner-overlay').classList.add('open');
     document.getElementById('qr-status').textContent = 'Iniciando cámara…';
     try {
-        qrStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: 'environment',
-                width: {
-                    ideal: 1280
-                },
-                height: {
-                    ideal: 720
-                }
-            }
-        });
+        qrStream = await navigator.mediaDevices.getUserMedia(getQrVideoConstraints());
         const video = document.getElementById('qr-video');
         video.srcObject = qrStream;
         await video.play();
+        await populateQrCameraSelector();
         qrWorking = false;
         document.getElementById('qr-status').textContent = 'Apunta la cámara al código QR';
         startQrDetection();
