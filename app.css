@@ -2365,3 +2365,8 @@ body {
 #print-label-area {
   display: none;
 }
+
+#screen-fichaje {    
+    overflow: auto;
+}
+
