@@ -2459,7 +2459,8 @@ async function printLabels() {
     // Generar QRs
     for (const item of items) {
         const payload = JSON.stringify({
-            type: labelsTab === 'materiales' ? 'material' : 'ubicacion',
+            type: labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario',
+            //type: labelsTab === 'materiales' ? 'material' : 'ubicacion',
             id: item.id,
             nombre: item.nombre
         });
@@ -2470,7 +2471,7 @@ async function printLabels() {
                     width: Math.min(sizePx * 0.55, 120),
                     height: Math.min(sizePx * 0.55, 120)
                 })
-                qrc.makeCode(payload);
+                qrc.makeCode(payload);                 
                 // await QRCode.toCanvas(canvas, payload, {
                 //   width: Math.min(sizePx*0.55, 120),
                 //   margin:1,
