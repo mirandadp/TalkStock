@@ -736,6 +736,10 @@ function normalizeNumbersInText(text) {
 let whisperPipeline = null;
 let whisperLoading = false;
 let whisperReady = false;
+let transformersLib = null;
+let qwenTextPipeline = null;
+let qwenTextLoading = false;
+let qwenTextReady = false;
 
 // MediaRecorder / detección de silencio
 let mediaStream = null, mediaRecorder = null, audioChunks = [];
@@ -754,10 +758,24 @@ function initVoice() {
         if (hint) hint.textContent = '⚠️ Este navegador no permite acceso al micrófono.';
         return;
     }
-    // Precarga silenciosa del modelo Whisper "base" en segundo plano.
-    // La primera vez descarga ~140MB (se cachea en el navegador);
-    // las siguientes veces se carga instantáneamente desde caché, sin red.
+    // Precarga silenciosa del stack de voz en segundo plano.
+    // Primero intenta cargar Transformers de forma robusta y luego prepara el
+    // modelo Qwen para normalizar el texto reconocido, con Whisper como fallback.
     ensureWhisperLoaded().catch(() => { });
+}
+
+async function loadTransformersLibrary() {
+    if (transformersLib) return transformersLib;
+    try {
+        transformersLib = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+    } catch (e1) {
+        try {
+            transformersLib = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js');
+        } catch (e2) {
+            throw e2;
+        }
+    }
+    return transformersLib;
 }
 
 async function ensureWhisperLoaded(onProgress) {
@@ -768,10 +786,16 @@ async function ensureWhisperLoaded(onProgress) {
     }
     whisperLoading = true;
     try {
-        const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+        const mod = await loadTransformersLibrary();
         const { pipeline, env } = mod;
-        env.allowLocalModels = false;
-        env.useBrowserCache = true; // cachea el modelo tras la primera descarga → funciona offline después
+        if (env) {
+            env.allowRemoteModels = true;
+            env.allowLocalModels = false;
+            env.useBrowserCache = true;
+            if (env.backends?.onnx?.wasm) {
+                env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/';
+            }
+        }
         whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
             progress_callback: p => { if (onProgress) onProgress(p); }
         });
@@ -783,6 +807,61 @@ async function ensureWhisperLoaded(onProgress) {
         whisperLoading = false;
     }
     return whisperPipeline;
+}
+
+async function ensureQwenVoiceModel(onProgress) {
+    if (qwenTextPipeline) return qwenTextPipeline;
+    if (qwenTextLoading) {
+        while (qwenTextLoading) await new Promise(r => setTimeout(r, 200));
+        return qwenTextPipeline;
+    }
+    qwenTextLoading = true;
+    try {
+        const mod = await loadTransformersLibrary();
+        const { pipeline, env } = mod;
+        if (env) {
+            env.allowRemoteModels = true;
+            env.allowLocalModels = false;
+            env.useBrowserCache = true;
+        }
+        const candidates = ['Qwen/Qwen2.5-Coder-3B-Instruct', 'Xenova/Qwen2.5-Coder-3B-Instruct'];
+        let lastError = null;
+        for (const modelId of candidates) {
+            try {
+                qwenTextPipeline = await pipeline('text-generation', modelId, {
+                    progress_callback: p => { if (onProgress) onProgress(p); }
+                });
+                qwenTextReady = true;
+                return qwenTextPipeline;
+            } catch (err) {
+                lastError = err;
+            }
+        }
+        throw lastError || new Error('No se pudo cargar el modelo Qwen');
+    } catch (e) {
+        console.warn('No se pudo cargar Qwen para normalizar voz:', e);
+        return null;
+    } finally {
+        qwenTextLoading = false;
+    }
+}
+
+async function normalizeVoiceTextWithQwen(rawText) {
+    if (!rawText) return rawText;
+    try {
+        const model = await ensureQwenVoiceModel();
+        if (!model) return rawText;
+        const prompt = `Corrige y normaliza este texto de voz al español. Responde solo con el texto corregido, sin explicaciones.\nTexto: ${rawText}\nTexto corregido:`;
+        const result = await model(prompt, { max_new_tokens: 80, temperature: 0.2, do_sample: false });
+        const generated = Array.isArray(result) ? result[0]?.generated_text : result?.generated_text;
+        const normalized = typeof generated === 'string'
+            ? generated.replace(/^.*Texto corregido:\s*/is, '').trim()
+            : '';
+        return normalized || rawText;
+    } catch (e) {
+        console.warn('Error aplicando Qwen a la voz:', e);
+        return rawText;
+    }
 }
 
 // ── Iniciar grabación de audio con detección automática de silencio ──
@@ -899,10 +978,9 @@ async function finishRecording() {
             updateWizVoiceText('No se detectó voz clara — inténtalo de nuevo', false);
             return;
         }
-        // Corrige números dichos en palabras ("noventa"→90, "cuarenta y cinco"→45)
-        // antes de interpretar el texto, ya que muchos nombres de material los llevan
-        // (ej. "tubo 90", "codo 45").
-        const text = normalizeNumbersInText(rawText);
+        const normalizedDraft = normalizeNumbersInText(rawText);
+        const finalText = await normalizeVoiceTextWithQwen(normalizedDraft);
+        const text = normalizeNumbersInText(finalText || normalizedDraft);
         updateWizVoiceText(text, false);
         wizProcessSpeech(text);
     } catch (e) {
@@ -2459,8 +2537,7 @@ async function printLabels() {
     // Generar QRs
     for (const item of items) {
         const payload = JSON.stringify({
-            type: labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario',
-            //type: labelsTab === 'materiales' ? 'material' : 'ubicacion',
+            type: labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario',            
             id: item.id,
             nombre: item.nombre
         });
