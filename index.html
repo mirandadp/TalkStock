@@ -5,27 +5,62 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#1a1a2e">
-  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="StockVoz — Gestión de material y presencia">
   <title>StockVoz</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="talkstock.css">
-  <link rel="stylesheet" href="lector.css">
+  <link rel="stylesheet" href="app.css">
 </head>
 
 <body>
-ddddfd
+
   <!-- LOGIN SCREEN -->
   <div id="login-screen">
     <div class="login-logo">📦</div>
     <div class="login-title">StockVoz</div>
-    <div class="login-sub">Gestión de material por voz 3 ddd</div>
+    <div class="login-sub">Gestión de material por voz</div>
     <div class="login-card">
-      <h2 id="login-title-text">Selecciona usuario</h2>
-      <div class="fg" id="user-select-wrap">
+
+      <!-- Comprobando estado inicial (spinner breve) -->
+      <div id="login-checking" style="text-align:center;padding:20px 0;">
+        <div class="login-spinner"></div>
+        <p style="font-size:12px;color:var(--text2);margin-top:12px;">Comprobando datos…</p>
+      </div>
+
+      <!-- Pantalla intermedia: ¿ya existe una nube configurada? -->
+      <div id="cloud-check-section" style="display:none;">
+        <h2 style="margin-bottom:8px;">¿Ya tienes StockVoz?</h2>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:16px;line-height:1.5;">
+          No hay usuarios en este dispositivo. Si tu equipo ya usa StockVoz en la nube,
+          conéctate para comprobar los usuarios existentes antes de crear uno nuevo.
+        </p>
+        <div class="fg"><label>Project URL de Supabase</label><input type="url" id="login-cloud-url"
+            placeholder="https://xxxx.supabase.co"></div>
+        <div class="fg"><label>API Key (anon/public)</label><input type="text" id="login-cloud-key"
+            placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXV..."></div>
+        <button class="btn btn-primary" onclick="connectCloudAndCheck()" id="cloud-connect-btn">🔗 Conectar y comprobar
+          usuarios</button>
+        <div style="text-align:center;margin:14px 0;font-size:11px;color:var(--text3);">— o —</div>
+        <button class="btn btn-secondary" onclick="skipCloudCheck()">🆕 Es la primera instalación, empezar de
+          cero</button>
+      </div>
+
+      <!-- Aviso: conectado pero sin usuarios en la nube -->
+      <div id="cloud-empty-notice"
+        style="display:none;background:rgba(243,156,18,.1);border:1px solid rgba(243,156,18,.3);border-radius:var(--rs);padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--warn);">
+        ☁️ Conectado a la nube, pero no se encontraron usuarios. Crea el primer administrador — se sincronizará
+        automáticamente.
+      </div>
+
+      <h2 id="login-title-text" style="display:none;">Selecciona usuario</h2>
+      <div class="fg" id="user-select-wrap" style="display:none;">
         <label>Usuario</label>
         <select id="login-user-sel" onchange="onUserSelect()">
           <option value="">— Seleccionar —</option>
         </select>
+        <button class="btn btn-secondary" onclick="showCloudCheckAgain()" style="font-size:11px;margin-top:10px;">☁️
+          Reconectar / cambiar nube</button>
       </div>
       <div id="pin-section" style="display:none;">
         <div id="login-role-badge" style="text-align:center;margin-bottom:12px;"></div>
@@ -52,28 +87,13 @@ ddddfd
           usuario</button>
       </div>
       <div id="first-setup" style="display:none;">
-        <p style="font-size:12px;color:var(--text2);margin-bottom:12px;">Primera vez — crea el usuario Administrador</p>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:12px;">Crea el usuario Administrador</p>
         <div class="fg"><label>Nombre</label><input type="text" id="setup-nombre" placeholder="Tu nombre"></div>
         <div class="fg"><label>PIN (4 dígitos)</label><input type="password" id="setup-pin" maxlength="4"
             placeholder="1234" inputmode="numeric"></div>
         <button class="btn btn-primary" onclick="createFirstAdmin()">Crear administrador</button>
-
-        1. <strong style="color:var(--accent)">supabase.com</strong> → New Project (gratis)<br>
-        <div id="sb-form">
-          <p class="section-title">Paso 1 — Crear proyecto</p>
-          <div class="setup-steps">
-            2. Settings → API → copia URL y anon key<br>
-            3. SQL Editor → pega el SQL → Run
-          </div>
-          <button class="btn btn-secondary" onclick="copySetupSQL()" style="margin-bottom:14px;">📋 Copiar SQL de
-            configuración</button>
-          <p class="section-title">Paso 2 — Credenciales</p>
-          <div class="form-group"><label>Project URL</label><input type="url" id="sb-url"
-              placeholder="https://xxxx.supabase.co"></div>
-          <div class="form-group"><label>API Key (anon/public)</label><input type="text" id="sb-key"
-              placeholder="eyJhbGci..."></div>
-          <button class="btn btn-primary" onclick="saveSupabaseConfig()">🔗 Conectar y sincronizar</button>
-        </div>
+        <button class="btn btn-secondary" onclick="showCloudCheckAgain()" style="font-size:11px;margin-top:8px;">←
+          Volver a comprobar la nube</button>
       </div>
     </div>
   </div>
@@ -124,6 +144,8 @@ ddddfd
                 </svg>
               </button>
               <p style="font-size:11px;color:var(--text3);margin-top:8px;">o di "entrada", "salida"...</p>
+              <p style="font-size:10px;color:var(--text3);margin-top:4px;">🧠 Reconocimiento de voz local (Qwen + Whisper) —
+                sin conexión tras la primera vez</p>
             </div>
           </div>
 
@@ -298,7 +320,7 @@ ddddfd
             <button class="tab" onclick="setAdminTab('sync')">☁️</button>
             <button class="tab" onclick="setAdminTab('export')">CSV</button>
           </div>
-          <!-- MATERIALES -->
+
           <div id="admin-mat">
             <p class="section-title">Añadir Material</p>
             <div class="form-group"><label>Nombre</label><input type="text" id="matNombre"
@@ -314,22 +336,18 @@ ddddfd
               <div class="form-group"><label>Stock mínimo</label><input type="number" id="matMin" value="0" min="0">
               </div>
             </div>
-            <div class="form-row">
-              <div class="form-group"><label>Proveedor</label><input type="text" id="matProveedor"
-                  placeholder="Proveedor"></div>
-              <div class="form-group"><label>Referencia</label><input type="text" id="matRef"
-                  placeholder="Ref. proveedor"></div>
-            </div>
+            <div class="form-group"><label>Proveedor</label><input type="text" id="matProveedor"
+                placeholder="Nombre del proveedor"></div>
             <div class="form-group"><label>Ubicación</label><select id="matUbic">
                 <option value="">Sin ubicación</option>
               </select></div>
             <div class="form-group"><label>Descripción / Notas</label><textarea id="matDesc" rows="2"
-                placeholder="Características, notas..." style="resize:none;"></textarea></div>
+                placeholder="Características, referencia, notas..." style="resize:none;"></textarea></div>
             <button class="btn btn-primary" onclick="addMaterial()">+ Añadir Material</button>
-            <p class="section-title">Materiales registrados</p>
+            <p class="section-title">Materiales</p>
             <div id="matList"></div>
           </div>
-          <!-- UBICACIONES -->
+
           <div id="admin-ubic" style="display:none;">
             <p class="section-title">Añadir Ubicación</p>
             <div class="form-row">
@@ -345,9 +363,9 @@ ddddfd
               </div>
             </div>
             <div class="form-group"><label>Dirección / Matrícula</label><input type="text" id="ubicDireccion"
-                placeholder="Calle, número o matrícula"></div>
+                placeholder="Calle, número o matrícula del vehículo"></div>
             <div class="form-group"><label>Descripción</label><textarea id="ubicDesc" rows="2"
-                placeholder="Detalles, acceso, notas..." style="resize:none;"></textarea></div>
+                placeholder="Detalles, acceso, horario, notas..." style="resize:none;"></textarea></div>
             <button class="btn btn-primary" onclick="addUbicacion()">+ Añadir Ubicación</button>
             <p class="section-title">Ubicaciones</p>
             <div id="ubicList"></div>
@@ -364,6 +382,7 @@ ddddfd
                   <option value="operario">Operario</option>
                   <option value="encargado">Encargado</option>
                   <option value="admin">Administrador</option>
+                  <option value="lector_presencia">📋 Lector de Presencia</option>
                 </select>
               </div>
               <div class="form-group"><label>PIN (4 dígitos)</label><input type="password" id="newUserPin" maxlength="4"
@@ -384,6 +403,8 @@ ddddfd
                   Admin</span></div>
               <div class="perm-row"><span>⚙️ Gestión completa</span><span style="font-size:11px;color:var(--gold);">Solo
                   Admin</span></div>
+              <div class="perm-row"><span>📋 Ver presencia / fichajes</span><span
+                  style="font-size:11px;color:var(--accent2);">Lector + Admin</span></div>
             </div>
             <button class="btn btn-primary" onclick="addUser()">+ Añadir Usuario</button>
             <p class="section-title">Usuarios del sistema</p>
@@ -408,22 +429,24 @@ ddddfd
                 descarga</button>
               <button class="btn btn-danger" onclick="clearSupabaseConfig()">🔌 Desconectar</button>
             </div>
-            <!-- <div id="sb-form">
-            <p class="section-title">Paso 1 — Crear proyecto</p>
-            <div class="setup-steps">
-              1. <strong style="color:var(--accent)">supabase.com</strong> → New Project (gratis)<br>
-              2. Settings → API → copia URL y anon key<br>
-              3. SQL Editor → pega el SQL → Run
+            <div id="sb-form">
+              <p class="section-title">Paso 1 — Crear proyecto</p>
+              <div class="setup-steps">
+                1. <strong style="color:var(--accent)">supabase.com</strong> → New Project (gratis)<br>
+                2. Settings → API → copia URL y anon key<br>
+                3. SQL Editor → pega el SQL → Run
+              </div>
+              <button class="btn btn-secondary" onclick="copySetupSQL()" style="margin-bottom:14px;">📋 Copiar SQL de
+                configuración</button>
+              <p class="section-title">Paso 2 — Credenciales</p>
+              <div class="form-group"><label>Project URL</label><input type="url" id="sb-url"
+                  placeholder="https://xxxx.supabase.co"></div>
+              <div class="form-group"><label>API Key (anon/public)</label><input type="text" id="sb-key"
+                  placeholder="eyJhbGci..."></div>
+              <button class="btn btn-primary" onclick="saveSupabaseConfig()">🔗 Conectar y sincronizar</button>
             </div>
-            <button class="btn btn-secondary" onclick="copySetupSQL()" style="margin-bottom:14px;">📋 Copiar SQL de configuración</button>
-            <p class="section-title">Paso 2 — Credenciales</p>
-            <div class="form-group"><label>Project URL</label><input type="url" id="sb-url" placeholder="https://xxxx.supabase.co"></div>
-            <div class="form-group"><label>API Key (anon/public)</label><input type="text" id="sb-key" placeholder="eyJhbGci..."></div>
-            <button class="btn btn-primary" onclick="saveSupabaseConfig()">🔗 Conectar y sincronizar</button>
-          </div> -->
           </div>
 
-          <!-- EXPORT -->
           <div id="admin-export" style="display:none;">
             <p class="section-title">Exportar Datos</p>
             <button class="btn btn-primary" onclick="exportCSV('inventario')">📊 Inventario CSV</button>
@@ -431,7 +454,6 @@ ddddfd
             <button class="btn btn-secondary" onclick="exportCSV('movimientos')">📋 Movimientos CSV</button>
             <button class="btn btn-secondary" onclick="exportCSV('pedidos')">🛒 Pedidos CSV</button>
             <button class="btn btn-secondary" onclick="exportCSV('todo')">📦 Todo CSV</button>
-            <div class="divider"></div>
             <p class="section-title">Herramientas</p>
             <button class="btn btn-secondary" onclick="loadSampleData()">🔧 Cargar datos de ejemplo</button>
             <button class="btn btn-danger" style="margin-top:6px;" onclick="clearAllData()">⚠️ Borrar todos los
@@ -439,157 +461,290 @@ ddddfd
           </div>
         </div>
       </div>
+    </div>
 
-      <div id="screen-fichaje" class="screen">
+    <div id="screen-fichaje" class="screen">
 
-        <!-- Toast de confirmación grande (entrada/salida registrada) -->
-        <div class="fichaje-confirm-toast hidden" id="fichaje-toast-overlay" onclick="hideFichajeToast()">
-          <div class="fichaje-confirm-inner" id="fichaje-toast-inner">
-            <div class="confirm-icon" id="fct-icon">✅</div>
+      <!-- ────────────────────────────────────────
+       VISTA OPERARIO (rol: lector_presencia)
+       Solo puede fichar, no ve registros ajenos
+       ──────────────────────────────────────── -->
+      <div id="vista-operario" style="display:none;">
+
+        <!-- Toast grande de confirmación -->
+        <div class="fich-toast-overlay hidden" id="fich-toast" onclick="hideFichajeToast()">
+          <div class="fich-toast-inner" id="fich-toast-inner">
+            <div class="fct-icon" id="fct-icon">✅</div>
             <h3 id="fct-title">Fichaje registrado</h3>
-            <p id="fct-sub">Juan García · 08:32</p>
-          </div>
-        </div>
-
-        <!-- Reloj en tiempo real -->
-        <div class="fichaje-clock">
-          <div class="clock-time" id="fichaje-clock-time">--:--:--</div>
-          <div class="clock-date" id="fichaje-clock-date">— — —</div>
-        </div>
-
-        <!-- Tabs: Fichar | Presentes | Historial -->
-        <div class="fichaje-tabs">
-          <button class="fichaje-tab active" id="ftab-fichar" onclick="setFichajeTab('fichar')">📲 Fichar</button>
-          <button class="fichaje-tab" id="ftab-presentes" onclick="setFichajeTab('presentes')">🟢 Presentes</button>
-          <button class="fichaje-tab" id="ftab-historial" onclick="setFichajeTab('historial')">📋 Historial</button>
-        </div>
-
-        <!-- ── TAB FICHAR ── -->
-        <div id="ftab-content-fichar">
-
-          <!-- Selector de operario -->
-          <div class="fichaje-selector">
-            <label>Selecciona operario</label>
-            <select id="fichaje-user-sel" onchange="onFichajeUserChange()">
-              <option value="">— Seleccionar —</option>
-            </select>
-          </div>
-
-          <!-- Estado actual del operario -->
-          <div class="fichaje-estado" id="fichaje-estado-bar">
-            <div class="estado-dot estado-unknown" id="fichaje-estado-dot"></div>
-            <span id="fichaje-estado-text" style="color:var(--text2);">
-              Selecciona un operario para ver su estado
-            </span>
-          </div>
-
-          <!-- Botones entrada / salida -->
-          <div class="fichaje-btns">
-            <button class="btn-fichaje-in" onclick="registrarFichaje('entrada')">
-              <div class="btn-icon-big">↑</div>
-              <div class="btn-label">ENTRADA</div>
-              <div class="btn-sub">Inicio jornada</div>
-            </button>
-            <button class="btn-fichaje-out" onclick="registrarFichaje('salida')">
-              <div class="btn-icon-big">↓</div>
-              <div class="btn-label">SALIDA</div>
-              <div class="btn-sub">Fin jornada</div>
-            </button>
-          </div>
-
-          <!-- Stats del día para el operario seleccionado -->
-          <div id="fichaje-hoy-wrap" style="display:none;">
-            <p style="font-size:11px;font-weight:700;color:var(--text3);
-                text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">
-              Hoy
+            <p id="fct-nombre">—</p>
+            <div class="fct-hora" id="fct-hora">--:--</div>
+            <p style="font-size:11px;color:var(--text3);margin-top:10px;">
+              Toca para cerrar
             </p>
-            <div id="fichaje-hoy-list"></div>
+          </div>
+        </div>
+
+        <div class="fichar-wrap">
+          <!-- Reloj -->
+          <div class="fichar-clock" style="width:100%;">
+            <div class="clock-time" id="fichar-clock-time">--:--:--</div>
+            <div class="clock-date" id="fichar-clock-date">—</div>
           </div>
 
-        </div><!-- /ftab-fichar -->
+          <!-- Escanear QR de credencial (siempre disponible) -->
+          <button class="btn btn-primary"
+            style="width:100%;margin-bottom:14px;display:flex;align-items:center;justify-content:center;gap:8px;min-height:80px;"
+            onclick="openQrScanner('fichaje')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+              <path d="M14 14h3v3m0 4h4v-4m-7 4h3" />
+            </svg>
+            Escanear código QR — Fichaje automático
+          </button>
 
-        <!-- ── TAB PRESENTES ── -->
-        <div id="ftab-content-presentes" style="display:none;">
+          <!-- Bloque de fichaje manual: solo visible si el admin lo habilita -->
+          <div id="fichar-manual-wrap" style="width:100%;display:none;">
+            <div style="width:100%;text-align:center;font-size:11px;color:var(--text3);margin-bottom:14px;">o selecciona
+              manualmente y pulsa un botón</div>
 
-          <div class="fichaje-stats-grid">
-            <div class="fichaje-stat-card">
-              <div class="num" id="fstat-presentes">0</div>
-              <div class="lbl">Presentes ahora</div>
+            <!-- Selector operario -->
+            <div class="fichar-selector" style="width:100%;">
+              <label>¿Quién ficha?</label>
+              <select id="fichar-user-sel" onchange="onFicharUserChange()">
+                <option value="">— Seleccionar operario —</option>
+              </select>
             </div>
-            <div class="fichaje-stat-card">
-              <div class="num" id="fstat-hoy">0</div>
-              <div class="lbl">Fichajes hoy</div>
+
+            <!-- Estado: dentro / fuera -->
+            <div class="fichar-estado" style="width:100%;" id="fichar-estado">
+              <div class="estado-dot estado-unknown" id="fichar-estado-dot"></div>
+              <span id="fichar-estado-txt" style="color:var(--text2);">
+                Selecciona un operario
+              </span>
             </div>
-            <div class="fichaje-stat-card">
-              <div class="num" id="fstat-semana">0</div>
-              <div class="lbl">Esta semana</div>
+
+            <!-- Botones ENTRADA / SALIDA -->
+            <div class="fichar-btns" style="width:100%;">
+              <button class="btn-fich btn-fich-in" onclick="registrarFichaje('entrada')">
+                <div class="fich-icon">↑</div>
+                <div class="fich-label">ENTRADA</div>
+                <div class="fich-sub">Inicio de jornada</div>
+              </button>
+              <button class="btn-fich btn-fich-out" onclick="registrarFichaje('salida')">
+                <div class="fich-icon">↓</div>
+                <div class="fich-label">SALIDA</div>
+                <div class="fich-sub">Fin de jornada</div>
+              </button>
             </div>
-            <div class="fichaje-stat-card">
-              <div class="num" id="fstat-total">0</div>
-              <div class="lbl">Total registros</div>
+
+            <!-- Últimos fichajes propios del operario seleccionado (hoy) -->
+            <div class="fichar-ultimo" id="fichar-ultimo" style="width:100%;">
+              <p>Fichajes de hoy</p>
+              <div id="fichar-ultimo-list"></div>
             </div>
+          </div><!-- /fichar-manual-wrap -->
+
+          <!-- Aviso cuando el fichaje manual está desactivado -->
+          <div id="fichar-manual-disabled-notice"
+            style="width:100%;text-align:center;font-size:12px;color:var(--text3);padding:10px;display:none;">
+            🔒 El fichaje manual está desactivado. Usa el escáner QR.
           </div>
 
-          <p style="font-size:12px;font-weight:700;color:var(--text3);
-              text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">
-            En el trabajo ahora
+        </div><!-- /fichar-wrap -->
+      </div><!-- /vista-operario -->
+
+
+      <!-- ────────────────────────────────────────
+       VISTA ADMINISTRADOR
+       Ve todo en tiempo real: presentes, historial, exportación
+       ──────────────────────────────────────── -->
+      <div id="vista-admin" style="display:none;">
+
+        <!-- Cabecera con botón recargar -->
+        <div class="admin-pres-header">
+          <div>
+            <h2>📋 Presencia</h2>
+            <div class="rt-indicator">
+              <div class="rt-dot" id="fich-rt-dot"></div>
+              <span id="fich-rt-label">Conectando…</span>
+            </div>
+          </div>
+          <button class="btn-reload" id="btn-reload-pres" onclick="recargarPresencia()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            Actualizar
+          </button>
+        </div>
+
+        <!-- Configuración: permitir fichaje manual en dispositivos lectores -->
+        <div class="config-card">
+          <div class="config-row">
+            <div>
+              <p class="config-title">Fichaje manual en lectores</p>
+              <p class="config-desc">Por defecto solo QR. Actívalo para permitir seleccionar operario a mano en los
+                dispositivos con rol Lector de Presencia.</p>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="cfg-fichaje-manual" onchange="onToggleFichajeManual(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Stats resumen -->
+        <div class="pres-stats">
+          <div class="pres-stat">
+            <div class="num" id="ps-presentes">0</div>
+            <div class="lbl">Ahora</div>
+          </div>
+          <div class="pres-stat">
+            <div class="num" id="ps-hoy">0</div>
+            <div class="lbl">Hoy</div>
+          </div>
+          <div class="pres-stat">
+            <div class="num" id="ps-semana">0</div>
+            <div class="lbl">Semana</div>
+          </div>
+          <div class="pres-stat">
+            <div class="num" id="ps-total">0</div>
+            <div class="lbl">Total</div>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="pres-tabs">
+          <button class="pres-tab active" id="ptab-ahora" onclick="setPresentesTab('ahora')">🟢 Ahora</button>
+          <button class="pres-tab" id="ptab-historial" onclick="setPresentesTab('historial')">📋 Historial</button>
+          <button class="pres-tab" id="ptab-jornadas" onclick="setPresentesTab('jornadas')">⏱ Jornadas</button>
+        </div>
+
+        <!-- ── TAB AHORA ── -->
+        <div id="ptab-content-ahora">
+          <p style="font-size:12px;color:var(--text3);font-weight:700;
+                text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">
+            Trabajando ahora
           </p>
-          <div class="presentes-list" id="presentes-list">
-            <p style="font-size:13px;color:var(--text3);text-align:center;
-                padding:20px 0;">Nadie fichado actualmente</p>
+          <div id="presentes-ahora-list">
+            <p style="color:var(--text3);font-size:13px;text-align:center;padding:24px 0;">
+              Nadie fichado ahora mismo
+            </p>
           </div>
 
-        </div><!-- /ftab-presentes -->
+          <div class="divider" style="height:1px;background:var(--border);margin:14px 0;"></div>
+          <button class="btn btn-primary"
+            style="width:100%;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:8px;"
+            onclick="openQrScanner('fichaje')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+              <path d="M14 14h3v3m0 4h4v-4m-7 4h3" />
+            </svg>
+            Escanear QR de operario
+          </button>
+
+          <p style="font-size:12px;color:var(--text3);font-weight:700;
+                text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">
+            Registrar fichaje manual
+          </p>
+          <div style="background:var(--card);border:1px solid var(--border);
+                  border-radius:var(--radius);padding:14px;margin-bottom:6px;">
+            <div class="form-group">
+              <label>Operario</label>
+              <select id="admin-fich-user" style="width:100%;background:var(--bg2);border:1px solid var(--border);
+                         border-radius:var(--rs);padding:10px;color:var(--text);
+                         font-size:14px;outline:none;">
+                <option value="">— Seleccionar —</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Nota (opcional)</label>
+              <input type="text" id="admin-fich-nota" placeholder="Ej: entrada tardía, permiso…" style="width:100%;background:var(--bg2);border:1px solid var(--border);
+                        border-radius:var(--rs);padding:10px;color:var(--text);
+                        font-size:13px;outline:none;">
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn-fich btn-fich-in" style="flex:1;padding:12px 8px;"
+                onclick="adminRegistrarFichaje('entrada')">↑ Entrada manual</button>
+              <button class="btn-fich btn-fich-out" style="flex:1;padding:12px 8px;"
+                onclick="adminRegistrarFichaje('salida')">↓ Salida manual</button>
+            </div>
+          </div>
+        </div><!-- /ptab-ahora -->
 
         <!-- ── TAB HISTORIAL ── -->
-        <div id="ftab-content-historial" style="display:none;">
-
-          <!-- Filtros -->
-          <div class="fichaje-filters">
-            <select id="fhist-user-filter" onchange="renderHistorial()">
-              <option value="">Todos los usuarios</option>
+        <div id="ptab-content-historial" style="display:none;">
+          <div class="fich-filters">
+            <select id="fhist-user" onchange="renderAdminHistorial()">
+              <option value="">Todos</option>
             </select>
-            <input type="date" id="fhist-date-filter" onchange="renderHistorial()" style="max-width:140px;">
+            <input type="date" id="fhist-date" onchange="renderAdminHistorial()">
           </div>
-
-          <!-- Tabla -->
-          <div class="fichajes-table-wrap">
-            <table class="fichajes-table">
+          <div class="fich-table-wrap">
+            <table class="fich-table">
               <thead>
                 <tr>
                   <th>Operario</th>
                   <th>Tipo</th>
                   <th>Fecha y hora</th>
                   <th>Duración</th>
-                  <th>Nota</th>
+                  <th>Nota / Dispositivo</th>
                 </tr>
               </thead>
-              <tbody id="fichajes-tbody"></tbody>
+              <tbody id="fhist-tbody"></tbody>
             </table>
           </div>
-
-          <!-- Paginación -->
-          <div class="paginacion" id="fichajes-paginacion">
+          <div class="fich-pag" id="fhist-pag">
             <button onclick="fHistPage(-1)">← Ant.</button>
-            <span id="fhist-page-info">Pág. 1</span>
+            <span id="fhist-pag-info">Pág. 1</span>
             <button onclick="fHistPage(1)">Sig. →</button>
           </div>
+        </div><!-- /ptab-historial -->
 
-          <!-- Exportar -->
-          <div style="margin-top:14px;">
-            <button class="btn-export-fichajes" onclick="exportFichajesCSV()">
-              📊 Exportar fichajes CSV
-            </button>
-            <button class="btn-export-fichajes" onclick="exportResumenCSV()">
-              📋 Exportar resumen de jornadas
-            </button>
+        <!-- ── TAB JORNADAS ── -->
+        <div id="ptab-content-jornadas" style="display:none;">
+          <div class="fich-filters">
+            <select id="fjorn-user" onchange="renderAdminJornadas()">
+              <option value="">Todos los operarios</option>
+            </select>
+            <input type="week" id="fjorn-week" onchange="renderAdminJornadas()">
           </div>
+          <div class="fich-table-wrap">
+            <table class="fich-table">
+              <thead>
+                <tr>
+                  <th>Operario</th>
+                  <th>Fecha</th>
+                  <th>1ª Entrada</th>
+                  <th>Última Salida</th>
+                  <th>Horas</th>
+                </tr>
+              </thead>
+              <tbody id="fjorn-tbody"></tbody>
+            </table>
+          </div>
+        </div><!-- /ptab-jornadas -->
 
-        </div><!-- /ftab-historial -->
+        <!-- Exportar -->
+        <div style="margin-top:14px;">
+          <button class="btn-exp" onclick="exportFichajesCSV()">
+            📊 Exportar fichajes CSV
+          </button>
+          <button class="btn-exp" onclick="exportResumenCSV()">
+            📋 Exportar resumen de jornadas CSV
+          </button>
+        </div>
 
-      </div><!-- /screen-fichaje -->
+      </div><!-- /vista-admin -->
 
-    </div>
+    </div><!-- /screen-fichaje -->
 
     <nav id="navbar">
       <button class="nav-btn active" onclick="showScreen('voz')" id="nav-voz">
@@ -704,6 +859,7 @@ ddddfd
       <div class="tabs" style="margin-bottom:12px;">
         <button class="tab active" onclick="setLabelsTab('materiales')">Materiales</button>
         <button class="tab" onclick="setLabelsTab('ubicaciones')">Ubicaciones</button>
+        <button class="tab" onclick="setLabelsTab('usuarios')">Usuarios</button>
       </div>
       <div id="labels-search-wrap" style="margin-bottom:10px;">
         <input type="search" id="labels-search" placeholder="Filtrar..." oninput="renderLabelsList()"
@@ -742,6 +898,19 @@ ddddfd
 
   <div id="toast"></div>
 
+  <!-- Modal edicion generica -->
+  <div class="modal-overlay" id="editModal">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal('editModal')">&#x2715;</button>
+      <h2 id="editModalTitle">Editar</h2>
+      <div id="editModalBody"></div>
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn btn-secondary" onclick="closeModal('editModal')">Cancelar</button>
+        <button class="btn btn-primary" id="editModalSave">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal genérico -->
   <div class="modal-overlay" id="confirmModal">
     <div class="modal">
@@ -755,24 +924,11 @@ ddddfd
     </div>
   </div>
 
-  <!-- Modal edición genérica -->
-  <div class="modal-overlay" id="editModal">
-    <div class="modal">
-      <button class="modal-close" onclick="closeModal('editModal')">✕</button>
-      <h2 id="editModalTitle">Editar</h2>
-      <div id="editModalBody"></div>
-      <div class="btn-row" style="margin-top:14px;">
-        <button class="btn btn-secondary" onclick="closeModal('editModal')">Cancelar</button>
-        <button class="btn btn-primary" id="editModalSave">Guardar cambios</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Modal nuevo pedido -->
   <div class="modal-overlay" id="pedidoModal">
     <div class="modal">
       <button class="modal-close" onclick="closeModal('pedidoModal')">✕</button>
-      <h2 id="pedidoModalTitle">Nuevo Pedido</h2>
+      <h2>Nuevo Pedido</h2>
       <div class="form-group"><label>Proveedor</label><input type="text" id="ped-proveedor"
           placeholder="Nombre del proveedor"></div>
       <div class="form-group"><label>Notas</label><textarea id="ped-notas" rows="2" placeholder="Observaciones..."
@@ -785,11 +941,11 @@ ddddfd
         <span style="font-size:13px;color:var(--text2);">Total estimado:</span>
         <span style="font-size:16px;font-weight:700;color:var(--gold);" id="ped-total">0,00 €</span>
       </div>
-      <button class="btn btn-primary" id="pedidoSaveBtn" onclick="savePedido()">📋 Crear pedido</button>
+      <button class="btn btn-primary" onclick="savePedido()">📋 Crear pedido</button>
     </div>
   </div>
 
-  <!-- Modal menú usuario -->
+  <!-- Modal usuario menú -->
   <div class="modal-overlay" id="userMenuModal">
     <div class="modal">
       <button class="modal-close" onclick="closeModal('userMenuModal')">✕</button>
@@ -804,12 +960,9 @@ ddddfd
       <button class="btn btn-secondary" onclick="showChangePinModal()">🔑 Cambiar PIN</button>
     </div>
   </div>
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script src="lector.js"></script>
-  <script src="TalkStock.js"></script>
+  <script src="app.js"></script>
   <script src="qrcode.min.js"></script>
-
 </body>
 
 </html>
