@@ -2324,7 +2324,7 @@ body {
   }
 
   /* Oculta el canvas y conserva solo la imagen imprimible */
-  #print-label-area .print-label div canvas {
+  #print-label-area .print-label div img {
     display: none !important;
   }
 
