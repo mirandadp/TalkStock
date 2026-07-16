@@ -2533,7 +2533,7 @@ async function printLabels() {
         wrapper.appendChild(div);
     }
     printArea.appendChild(wrapper);
-
+    
     // Generar QRs
     for (const item of items) {
         const payload = JSON.stringify({

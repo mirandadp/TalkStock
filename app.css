@@ -2327,7 +2327,7 @@ body {
   #print-label-area .print-label div img {
     display: none !important;
   }
-
+  
   #print-label-area {
     position: fixed;
     inset: 0;
