@@ -2052,7 +2052,11 @@ function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 let toastTimer;
-function toast(msg, type = '') { const el = document.getElementById('toast'); el.textContent = msg; el.className = 'show ' + type; clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = '', 3000); }
+function toast(msg, type = '') {
+    const el = document.getElementById('toast');
+    el.textContent = msg; el.className = 'show ' + type;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = '', 5000);
+}
 
 function updateNetStatus() {
     const el = document.getElementById('net-status'); if (!el) return;
@@ -2246,7 +2250,18 @@ async function handleQrResult(raw) {
     document.getElementById('qr-status').textContent = '✓ Código leído — ' + raw.substring(0, 40);
 
     let payload;
-    try { payload = JSON.parse(raw); } catch (e) { payload = { type: 'unknown', raw }; }
+    try {
+        payload = JSON.parse(raw);
+    }
+    catch (e) {
+        try {
+            // decodificamos por si se codificó antes
+            payload = JSON.parse(decodeURIComponent(raw))
+        }
+        catch (e2) {
+            payload = { type: 'unknown', raw };
+        }
+    }
 
     closeQrScanner();
 
@@ -2533,31 +2548,51 @@ async function printLabels() {
         wrapper.appendChild(div);
     }
     printArea.appendChild(wrapper);
-    
+
     // Generar QRs
     for (const item of items) {
         const payload = JSON.stringify({
-            type: labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario',            
+            type: labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario',
             id: item.id,
             nombre: item.nombre
         });
         const canvas = printArea.querySelector(`#qrc-${item.id}`);
         if (canvas) {
+            // try {
+            //     var qrc = new QRCode(canvas, {
+            //         width: Math.min(sizePx * 0.55, 120),
+            //         height: Math.min(sizePx * 0.55, 120),
+            //         //correctLevel:QRCode.CorrectLevel.M,
+            //         version:10
+            //     })
+            //     qrc.makeCode(payload);                 
+            //     // await QRCode.toCanvas(canvas, payload, {
+            //     //   width: Math.min(sizePx*0.55, 120),
+            //     //   margin:1,
+            //     //   color:{ dark:'#1a1a2e', light:'#ffffff' }
+            //     // });
+            // } catch (e) {
+            //     console.error('QR error', e);
+            // }
+
             try {
-                var qrc = new QRCode(canvas, {
+                // Intentar con texto original
+                const qr = new QRCode(canvas, {
+                    text: payload,
                     width: Math.min(sizePx * 0.55, 120),
                     height: Math.min(sizePx * 0.55, 120),
-                    correctLevel:QRCode.CorrectLevel.M,
-                    version:10
-                })
-                qrc.makeCode(payload);                 
-                // await QRCode.toCanvas(canvas, payload, {
-                //   width: Math.min(sizePx*0.55, 120),
-                //   margin:1,
-                //   color:{ dark:'#1a1a2e', light:'#ffffff' }
-                // });
+                    correctLevel: QRCode.CorrectLevel.L
+                });
             } catch (e) {
-                console.error('QR error', e);
+                // Si falla, codificar en URI
+                const textoCodificado = encodeURIComponent(payload);
+                const qr = new QRCode(canvas, {
+                    text: textoCodificado,
+                    width: Math.min(sizePx * 0.55, 120),
+                    height: Math.min(sizePx * 0.55, 120),
+                    correctLevel: QRCode.CorrectLevel.L
+                });
+                console.warn('Texto codificado debido a caracteres especiales');
             }
         }
     }
