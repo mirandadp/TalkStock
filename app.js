@@ -2547,7 +2547,8 @@ async function printLabels() {
                 var qrc = new QRCode(canvas, {
                     width: Math.min(sizePx * 0.55, 120),
                     height: Math.min(sizePx * 0.55, 120),
-                    correctLevel:QRCode.CorrectLevel.M
+                    correctLevel:QRCode.CorrectLevel.M,
+                    version=10
                 })
                 qrc.makeCode(payload);                 
                 // await QRCode.toCanvas(canvas, payload, {
