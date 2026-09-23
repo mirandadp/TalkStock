@@ -3505,7 +3505,7 @@ async function renderAdminAhora() {
         el.innerHTML = `<p style="color:var(--text3);font-size:13px;
                     text-align:center;padding:24px 0;">
       Nadie fichado ahora mismo</p>`;
-        return;
+        
     }
 
     el.innerHTML = presentes.map(f => {
