@@ -38,10 +38,59 @@ function fmtAudit(r) {
 function esc(s) { return (s || '').toString().replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 // ══════════════════════════════════════════════
+// SEGURIDAD DEL PIN — nunca se guarda en texto plano
+// Antes el PIN se guardaba tal cual en IndexedDB, visible en
+// DevTools → Application → IndexedDB. Ahora se guarda como hash
+// SHA-256 con salt aleatorio por usuario (Web Crypto API, nativo
+// del navegador, sin librerías externas), tanto en local como al
+// sincronizar con Supabase.
+// ══════════════════════════════════════════════
+function generateSalt() {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+async function hashPin(pin, salt) {
+    const enc = new TextEncoder().encode(salt + ':' + pin);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+// Genera {pinHash,pinSalt} listos para guardar en el registro del usuario
+async function makePinFields(pin) {
+    const pinSalt = generateSalt();
+    const pinHash = await hashPin(pin, pinSalt);
+    return { pinHash, pinSalt };
+}
+// Comprueba un PIN introducido contra el hash guardado.
+// Compatibilidad retroactiva: si el usuario aún tiene el campo antiguo
+// `pin` en texto plano (de instalaciones previas a este cambio), se
+// verifica contra él UNA sola vez y se migra automáticamente a hash,
+// borrando el texto plano tanto local como remotamente.
+async function verifyPin(user, pin) {
+    if (user.pinHash && user.pinSalt) {
+        const h = await hashPin(pin, user.pinSalt);
+        return h === user.pinHash;
+    }
+    if (user.pin !== undefined) {
+        const matches = user.pin === pin;
+        if (matches) {
+            const { pinHash, pinSalt } = await makePinFields(pin);
+            user.pinHash = pinHash; user.pinSalt = pinSalt;
+            delete user.pin;
+            user.synced = 0;
+            await dbPut('usuarios', user);
+            if (typeof scheduleSyncSoon === 'function') scheduleSyncSoon();
+        }
+        return matches;
+    }
+    return false;
+}
+
+// ══════════════════════════════════════════════
 // INDEXEDDB
 // ══════════════════════════════════════════════
 let db;
-const DB_NAME = 'StockVozDB', DB_VER = 7;
+const DB_NAME = 'StockVozDB', DB_VER = 8;
 
 function initDB() {
     return new Promise((res, rej) => {
@@ -233,7 +282,8 @@ async function createFirstAdmin() {
     if (!n) { toast('Escribe tu nombre', 'error'); return; }
     if (!/^\d{4}$/.test(p)) { toast('El PIN debe ser 4 dígitos', 'error'); return; }
     const now = new Date().toISOString();
-    const id = await dbAdd('usuarios', { nombre: n, rol: 'admin', pin: p, creado: now, creadoPor: n, modificadoPor: n, modificadoEn: now, synced: 0 });
+    const { pinHash, pinSalt } = await makePinFields(p);
+    const id = await dbAdd('usuarios', { nombre: n, rol: 'admin', pinHash, pinSalt, creado: now, creadoPor: n, modificadoPor: n, modificadoEn: now, synced: 0 });
     toast('✓ Administrador creado. Accede ahora.', 'success');
     // Si hay conexión a la nube ya configurada, subir el nuevo admin inmediatamente
     if (SB && navigator.onLine) { try { await syncNow(); } catch (e) { } }
@@ -282,7 +332,7 @@ async function checkPin() {
     const id = parseInt(document.getElementById('login-user-sel').value);
     const usuarios = await dbGetAll('usuarios');
     const u = usuarios.find(x => x.id === id);
-    if (u && u.pin === pinBuffer) {
+    if (u && await verifyPin(u, pinBuffer)) {
         doLogin(u);
     } else {
         toast('PIN incorrecto', 'error');
@@ -371,9 +421,11 @@ function showChangePinModal() {
         async () => {
             const old = document.getElementById('pin-old').value;
             const nw = document.getElementById('pin-new').value;
-            if (old !== currentUser.pin) { toast('PIN actual incorrecto', 'error'); return; }
+            if (!(await verifyPin(currentUser, old))) { toast('PIN actual incorrecto', 'error'); return; }
             if (!/^\d{4}$/.test(nw)) { toast('El PIN debe ser 4 dígitos', 'error'); return; }
-            currentUser.pin = nw; currentUser.synced = 0;
+            const { pinHash, pinSalt } = await makePinFields(nw);
+            currentUser.pinHash = pinHash; currentUser.pinSalt = pinSalt; delete currentUser.pin;
+            currentUser.synced = 0;
             await dbPut('usuarios', currentUser);
             toast('✓ PIN actualizado', 'success');
             scheduleSyncSoon();
@@ -390,10 +442,16 @@ const SETUP_SQL = `-- StockVoz — SQL para Supabase (pega y ejecuta en SQL Edit
 create table if not exists ubicaciones(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,tipo text default 'almacen',direccion text,descripcion text,creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists materiales(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,cantidad numeric default 0,unidad text default 'ud',precio numeric default 0,minimo numeric default 0,proveedor text,descripcion text,ubicacion_id uuid references ubicaciones(id),creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists movimientos(id uuid primary key default gen_random_uuid(),local_id integer,tipo text not null,cantidad numeric not null,material_id uuid references materiales(id),ubicacion_id uuid references ubicaciones(id),fecha timestamptz default now(),usuario text,nota text,created_at timestamptz default now());
-create table if not exists usuarios(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,rol text default 'operario',pin text,creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
+create table if not exists usuarios(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,rol text default 'operario',pin_hash text,pin_salt text,creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists pedidos(id uuid primary key default gen_random_uuid(),local_id integer,proveedor text,estado text default 'pendiente',notas text,lineas jsonb,total numeric default 0,creado_por text,modificado_por text,modificado_en timestamptz,fecha timestamptz default now(),updated_at timestamptz default now());
-create table if not exists fichajes(id uuid primary key default gen_random_uuid(),local_id integer,user_id integer,nombre_usuario text,rol_usuario text,tipo text not null,fecha timestamptz not null,fecha_local text,creado_por text,dispositivo text,nota text,created_at timestamptz default now());
+create table if not exists fichajes(id uuid primary key default gen_random_uuid(),local_id integer,user_id integer,nombre_usuario text,rol_usuario text,tipo text not null,fecha timestamptz not null,fecha_local text,creado_por text,modificado_por text,dispositivo text,nota text,created_at timestamptz default now(),updated_at timestamptz default now());
 create table if not exists config(key text primary key,value jsonb,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
+create table if not exists remote_commands(id uuid primary key default gen_random_uuid(),target_user_remote_id uuid,target_user_nombre text,scope text[],action text,creado_por text,created_at timestamptz default now(),executed boolean default false,executed_at timestamptz,executed_device text);
+-- Registro genérico de eliminaciones ("tumbas"), para que otros dispositivos
+-- sepan qué borrar aunque Postgres no notifique DELETEs por sí solo.
+-- 'tabla' indica de qué tabla venía el registro (materiales, ubicaciones,
+-- usuarios, fichajes...) y 'remote_id' es su id real en Supabase.
+create table if not exists registros_borrados(id uuid primary key default gen_random_uuid(),tabla text not null,remote_id uuid not null,borrado_por text,borrado_en timestamptz default now());
 -- Si las tablas ya existían de una versión anterior, añade las columnas nuevas:
 alter table ubicaciones add column if not exists direccion text;
 alter table ubicaciones add column if not exists descripcion text;
@@ -407,23 +465,52 @@ alter table materiales add column if not exists modificado_en timestamptz;
 alter table usuarios add column if not exists creado_por text;
 alter table usuarios add column if not exists modificado_por text;
 alter table usuarios add column if not exists modificado_en timestamptz;
+-- Seguridad: el PIN ya no se guarda en texto plano, solo como hash+salt.
+-- Si tu tabla venía de una versión anterior con la columna 'pin' en texto
+-- plano, esto añade las nuevas columnas y borra el texto plano existente.
+alter table usuarios add column if not exists pin_hash text;
+alter table usuarios add column if not exists pin_salt text;
+do $$ begin if exists(select 1 from information_schema.columns where table_name='usuarios' and column_name='pin') then update usuarios set pin=null where pin is not null; end if; end $$;
 alter table pedidos add column if not exists modificado_por text;
 alter table pedidos add column if not exists modificado_en timestamptz;
+alter table fichajes add column if not exists updated_at timestamptz default now();
+alter table fichajes add column if not exists modificado_por text;
 
 create index if not exists idx_fichajes_user on fichajes(user_id);
 create index if not exists idx_fichajes_fecha on fichajes(fecha);
+create index if not exists idx_remote_cmds_target on remote_commands(target_user_remote_id);
+create index if not exists idx_registros_borrados_fecha on registros_borrados(borrado_en);
+create index if not exists idx_registros_borrados_tabla on registros_borrados(tabla);
+
+-- Evita que borrar una ubicación o un material falle por integridad
+-- referencial: los registros que la referenciaban quedan sin asignar.
+do $$ begin
+  if exists(select 1 from information_schema.table_constraints where constraint_name='materiales_ubicacion_id_fkey') then
+    alter table materiales drop constraint materiales_ubicacion_id_fkey;
+  end if;
+  alter table materiales add constraint materiales_ubicacion_id_fkey foreign key(ubicacion_id) references ubicaciones(id) on delete set null;
+  if exists(select 1 from information_schema.table_constraints where constraint_name='movimientos_material_id_fkey') then
+    alter table movimientos drop constraint movimientos_material_id_fkey;
+  end if;
+  alter table movimientos add constraint movimientos_material_id_fkey foreign key(material_id) references materiales(id) on delete set null;
+  if exists(select 1 from information_schema.table_constraints where constraint_name='movimientos_ubicacion_id_fkey') then
+    alter table movimientos drop constraint movimientos_ubicacion_id_fkey;
+  end if;
+  alter table movimientos add constraint movimientos_ubicacion_id_fkey foreign key(ubicacion_id) references ubicaciones(id) on delete set null;
+end $$;
 
 create or replace function update_updated_at() returns trigger as $$ begin new.updated_at=now();return new;end;$$ language plpgsql;
-do $$ begin if not exists(select 1 from pg_trigger where tgname='trg_ubic_upd') then create trigger trg_ubic_upd before update on ubicaciones for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_mat_upd') then create trigger trg_mat_upd before update on materiales for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_usr_upd') then create trigger trg_usr_upd before update on usuarios for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_ped_upd') then create trigger trg_ped_upd before update on pedidos for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_cfg_upd') then create trigger trg_cfg_upd before update on config for each row execute function update_updated_at();end if;end$$;
+do $$ begin if not exists(select 1 from pg_trigger where tgname='trg_ubic_upd') then create trigger trg_ubic_upd before update on ubicaciones for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_mat_upd') then create trigger trg_mat_upd before update on materiales for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_usr_upd') then create trigger trg_usr_upd before update on usuarios for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_ped_upd') then create trigger trg_ped_upd before update on pedidos for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_cfg_upd') then create trigger trg_cfg_upd before update on config for each row execute function update_updated_at();end if;if not exists(select 1 from pg_trigger where tgname='trg_fich_upd') then create trigger trg_fich_upd before update on fichajes for each row execute function update_updated_at();end if;end$$;
 
-alter table ubicaciones enable row level security;alter table materiales enable row level security;alter table movimientos enable row level security;alter table usuarios enable row level security;alter table pedidos enable row level security;alter table fichajes enable row level security;alter table config enable row level security;
-do $$ begin if not exists(select 1 from pg_policies where tablename='ubicaciones' and policyname='public_all') then create policy public_all on ubicaciones for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='materiales' and policyname='public_all') then create policy public_all on materiales for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='movimientos' and policyname='public_all') then create policy public_all on movimientos for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='usuarios' and policyname='public_all') then create policy public_all on usuarios for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='pedidos' and policyname='public_all') then create policy public_all on pedidos for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='fichajes' and policyname='public_all') then create policy public_all on fichajes for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='config' and policyname='public_all') then create policy public_all on config for all using(true) with check(true);end if;end$$;
+alter table ubicaciones enable row level security;alter table materiales enable row level security;alter table movimientos enable row level security;alter table usuarios enable row level security;alter table pedidos enable row level security;alter table fichajes enable row level security;alter table config enable row level security;alter table remote_commands enable row level security;alter table registros_borrados enable row level security;
+do $$ begin if not exists(select 1 from pg_policies where tablename='ubicaciones' and policyname='public_all') then create policy public_all on ubicaciones for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='materiales' and policyname='public_all') then create policy public_all on materiales for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='movimientos' and policyname='public_all') then create policy public_all on movimientos for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='usuarios' and policyname='public_all') then create policy public_all on usuarios for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='pedidos' and policyname='public_all') then create policy public_all on pedidos for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='fichajes' and policyname='public_all') then create policy public_all on fichajes for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='config' and policyname='public_all') then create policy public_all on config for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='remote_commands' and policyname='public_all') then create policy public_all on remote_commands for all using(true) with check(true);end if;if not exists(select 1 from pg_policies where tablename='registros_borrados' and policyname='public_all') then create policy public_all on registros_borrados for all using(true) with check(true);end if;end$$;
 
 alter publication supabase_realtime add table movimientos;
 alter publication supabase_realtime add table materiales;
 alter publication supabase_realtime add table pedidos;
 alter publication supabase_realtime add table fichajes;
-alter publication supabase_realtime add table config;`.trim();
+alter publication supabase_realtime add table config;
+alter publication supabase_realtime add table remote_commands;`.trim();
 
 function getSBConfig() { return { url: localStorage.getItem('sb_url') || '', key: localStorage.getItem('sb_key') || '' }; }
 function initSupabase() { const { url, key } = getSBConfig(); if (!url || !key) return false; try { SB = window.supabase.createClient(url, key); return true; } catch (e) { return false; } }
@@ -434,39 +521,87 @@ async function syncNow() {
     if (syncBusy) return; syncBusy = true;
     try {
         const [ubics, mats, movs, users, peds] = await Promise.all([dbGetAll('ubicaciones'), dbGetAll('materiales'), dbGetAll('movimientos'), dbGetAll('usuarios'), dbGetAll('pedidos')]);
+
+        // NOTA: se usa "insertar si es nuevo, actualizar por remote_id si ya existía"
+        // en vez de upsert(...,{onConflict:'local_id'}). local_id es solo un contador
+        // interno de CADA dispositivo (no es único entre dispositivos distintos) y la
+        // tabla no tiene restricción única sobre esa columna, así que un upsert con
+        // onConflict ahí fallaba silenciosamente al re-sincronizar una edición.
+
         // push ubicaciones
         for (const u of ubics.filter(x => !x.synced)) {
-            const { data, error } = await SB.from('ubicaciones').upsert({ nombre: u.nombre, tipo: u.tipo, direccion: u.direccion || '', descripcion: u.descripcion || '', local_id: u.id, creado: u.creado, creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null }, { onConflict: 'local_id' }).select().single();
-            if (!error && data) { u.synced = 1; u.remote_id = data.id; await dbPut('ubicaciones', u); }
+            const payload = { nombre: u.nombre, tipo: u.tipo, direccion: u.direccion || '', descripcion: u.descripcion || '', creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
+            if (u.remote_id) {
+                const { error } = await SB.from('ubicaciones').update(payload).eq('id', u.remote_id);
+                if (!error) { u.synced = 1; await dbPut('ubicaciones', u); }
+            } else {
+                const { data, error } = await SB.from('ubicaciones').insert({ ...payload, local_id: u.id, creado: u.creado }).select().single();
+                if (!error && data) { u.synced = 1; u.remote_id = data.id; await dbPut('ubicaciones', u); }
+            }
         }
         const ubicsSynced = await dbGetAll('ubicaciones');
+
         // push materiales
         for (const m of mats.filter(x => !x.synced)) {
             const ub = ubicsSynced.find(u => u.id === m.ubicacionId);
-            const { data, error } = await SB.from('materiales').upsert({ nombre: m.nombre, cantidad: m.cantidad, unidad: m.unidad || 'ud', precio: m.precio || 0, minimo: m.minimo || 0, proveedor: m.proveedor || '', descripcion: m.descripcion || '', local_id: m.id, ubicacion_id: ub?.remote_id || null, creado: m.creado, creado_por: m.creadoPor || '', modificado_por: m.modificadoPor || '', modificado_en: m.modificadoEn || null }, { onConflict: 'local_id' }).select().single();
-            if (!error && data) { m.synced = 1; m.remote_id = data.id; await dbPut('materiales', m); }
+            const payload = { nombre: m.nombre, cantidad: m.cantidad, unidad: m.unidad || 'ud', precio: m.precio || 0, minimo: m.minimo || 0, proveedor: m.proveedor || '', descripcion: m.descripcion || '', ubicacion_id: ub?.remote_id || null, creado_por: m.creadoPor || '', modificado_por: m.modificadoPor || '', modificado_en: m.modificadoEn || null };
+            if (m.remote_id) {
+                const { error } = await SB.from('materiales').update(payload).eq('id', m.remote_id);
+                if (!error) { m.synced = 1; await dbPut('materiales', m); }
+            } else {
+                const { data, error } = await SB.from('materiales').insert({ ...payload, local_id: m.id, creado: m.creado }).select().single();
+                if (!error && data) { m.synced = 1; m.remote_id = data.id; await dbPut('materiales', m); }
+            }
         }
         const matsSynced = await dbGetAll('materiales');
-        // push movimientos
+
+        // push movimientos (registro histórico, nunca se edita — insert simple)
         let pushed = 0;
         for (const mv of movs.filter(x => !x.synced)) {
             const mt = matsSynced.find(m => m.id === mv.materialId); const ub = ubicsSynced.find(u => u.id === mv.ubicacionId);
-            const { error } = await SB.from('movimientos').upsert({ tipo: mv.tipo, cantidad: mv.cantidad, nota: mv.nota || '', fecha: mv.fecha, usuario: mv.usuario || '', local_id: mv.id, material_id: mt?.remote_id || null, ubicacion_id: ub?.remote_id || null }, { onConflict: 'local_id' });
+            const { error } = await SB.from('movimientos').insert({ tipo: mv.tipo, cantidad: mv.cantidad, nota: mv.nota || '', fecha: mv.fecha, usuario: mv.usuario || '', local_id: mv.id, material_id: mt?.remote_id || null, ubicacion_id: ub?.remote_id || null });
             if (!error) { mv.synced = 1; await dbPut('movimientos', mv); pushed++; }
         }
-        // push usuarios
+
+        // push usuarios (el PIN nunca se sube en texto plano: solo hash+salt;
+        // si el usuario aún conservaba el campo antiguo `pin`, se limpia también en la nube)
         for (const u of users.filter(x => !x.synced)) {
-            const { data, error } = await SB.from('usuarios').upsert({ nombre: u.nombre, rol: u.rol, pin: u.pin, local_id: u.id, creado: u.creado, creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null }, { onConflict: 'local_id' }).select().single();
-            if (!error && data) { u.synced = 1; u.remote_id = data.id; await dbPut('usuarios', u); }
+            const payload = { nombre: u.nombre, rol: u.rol, pin_hash: u.pinHash || null, pin_salt: u.pinSalt || null, pin: null, creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
+            if (u.remote_id) {
+                const { error } = await SB.from('usuarios').update(payload).eq('id', u.remote_id);
+                if (!error) { u.synced = 1; await dbPut('usuarios', u); }
+            } else {
+                const { data, error } = await SB.from('usuarios').insert({ ...payload, local_id: u.id, creado: u.creado }).select().single();
+                if (!error && data) { u.synced = 1; u.remote_id = data.id; await dbPut('usuarios', u); }
+            }
         }
+
         // push pedidos
         for (const p of peds.filter(x => !x.synced)) {
-            const { error } = await SB.from('pedidos').upsert({ proveedor: p.proveedor || '', estado: p.estado, notas: p.notas || '', lineas: p.lineas || [], total: p.total || 0, creado_por: p.creadoPor || '', modificado_por: p.modificadoPor || '', modificado_en: p.modificadoEn || null, fecha: p.fecha, local_id: p.id }, { onConflict: 'local_id' });
-            if (!error) { p.synced = 1; await dbPut('pedidos', p); }
+            const payload = { proveedor: p.proveedor || '', estado: p.estado, notas: p.notas || '', lineas: p.lineas || [], total: p.total || 0, creado_por: p.creadoPor || '', modificado_por: p.modificadoPor || '', modificado_en: p.modificadoEn || null };
+            if (p.remote_id) {
+                const { error } = await SB.from('pedidos').update(payload).eq('id', p.remote_id);
+                if (!error) { p.synced = 1; await dbPut('pedidos', p); }
+            } else {
+                const { data, error } = await SB.from('pedidos').insert({ ...payload, local_id: p.id, fecha: p.fecha }).select().single();
+                if (!error && data) { p.synced = 1; p.remote_id = data.id; await dbPut('pedidos', p); }
+            }
         }
         if (pushed > 0) toast(`☁️ ${pushed} movimientos subidos`, 'success');
         const fichs = await dbGetAll('fichajes');
-        for (const f of fichs.filter(x => !x.sinc)) { const { error } = await SB.from('fichajes').upsert({ local_id: f.id, user_id: f.userId, nombre_usuario: f.nombreUsuario, rol_usuario: f.rolUsuario, tipo: f.tipo, fecha: f.fecha, fecha_local: f.fechaLocal, creado_por: f.creadoPor, dispositivo: f.dispositivo, nota: f.nota || '' }, { onConflict: 'local_id' }); if (!error) { f.sinc = 1; await dbPut('fichajes', f); } }
+        for (const f of fichs.filter(x => !x.sinc)) {
+            const payload = { user_id: f.userId, nombre_usuario: f.nombreUsuario, rol_usuario: f.rolUsuario, tipo: f.tipo, fecha: f.fecha, fecha_local: f.fechaLocal, creado_por: f.creadoPor, dispositivo: f.dispositivo, nota: f.nota || '' };
+            if (f.remote_id) {
+                // Ya existía en la nube (p.ej. se editó tras un sync previo) → actualizar por su id real
+                const { error } = await SB.from('fichajes').update(payload).eq('id', f.remote_id);
+                if (!error) { f.sinc = 1; await dbPut('fichajes', f); }
+            } else {
+                // Primer envío: insert simple (local_id no es único entre dispositivos,
+                // así que no se usa upsert/onConflict aquí)
+                const { data, error } = await SB.from('fichajes').insert({ ...payload, local_id: f.id }).select().single();
+                if (!error && data) { f.sinc = 1; f.remote_id = data.id; await dbPut('fichajes', f); }
+            }
+        }
         // push config (ajustes globales, ej. permitir fichaje manual)
         const cfgs = await dbGetAll('config');
         for (const c of cfgs.filter(x => !x.synced)) {
@@ -489,16 +624,50 @@ async function pullRemoteData() {
         const { data: rMv } = await SB.from('movimientos').select('*').gt('created_at', lastPull);
         if (rMv?.length) { const lmv = await dbGetAll('movimientos'); const lmt = await dbGetAll('materiales'); const lub = await dbGetAll('ubicaciones'); for (const rm of rMv) { if (!lmv.find(m => m.local_id === rm.local_id && rm.local_id)) { const mt = lmt.find(m => m.remote_id === rm.material_id); const ub = lub.find(u => u.remote_id === rm.ubicacion_id); await dbAdd('movimientos', { tipo: rm.tipo, cantidad: rm.cantidad, nota: rm.nota, fecha: rm.fecha, usuario: rm.usuario, local_id: rm.local_id, materialId: mt?.id || null, ubicacionId: ub?.id || null, synced: 1 }); } } }
         const { data: rUs } = await SB.from('usuarios').select('*').gt('updated_at', lastPull);
-        if (rUs?.length) { const lu = await dbGetAll('usuarios'); for (const ru of rUs) { const ex = lu.find(u => u.remote_id === ru.id || u.id === ru.local_id); if (ex) { ex.nombre = ru.nombre; ex.rol = ru.rol; ex.pin = ru.pin; ex.creadoPor = ru.creado_por; ex.modificadoPor = ru.modificado_por; ex.modificadoEn = ru.modificado_en; ex.remote_id = ru.id; ex.synced = 1; await dbPut('usuarios', ex); } else { await dbAdd('usuarios', { nombre: ru.nombre, rol: ru.rol, pin: ru.pin, remote_id: ru.id, local_id: ru.local_id, creadoPor: ru.creado_por, modificadoPor: ru.modificado_por, modificadoEn: ru.modificado_en, synced: 1, creado: ru.creado }); } } }
+        if (rUs?.length) { const lu = await dbGetAll('usuarios'); for (const ru of rUs) { const ex = lu.find(u => u.remote_id === ru.id || u.id === ru.local_id); if (ex) { ex.nombre = ru.nombre; ex.rol = ru.rol; if (ru.pin_hash) { ex.pinHash = ru.pin_hash; ex.pinSalt = ru.pin_salt; } delete ex.pin; ex.creadoPor = ru.creado_por; ex.modificadoPor = ru.modificado_por; ex.modificadoEn = ru.modificado_en; ex.remote_id = ru.id; ex.synced = 1; await dbPut('usuarios', ex); } else { await dbAdd('usuarios', { nombre: ru.nombre, rol: ru.rol, pinHash: ru.pin_hash || null, pinSalt: ru.pin_salt || null, remote_id: ru.id, local_id: ru.local_id, creadoPor: ru.creado_por, modificadoPor: ru.modificado_por, modificadoEn: ru.modificado_en, synced: 1, creado: ru.creado }); } } }
         const { data: rP } = await SB.from('pedidos').select('*').gt('updated_at', lastPull);
-        if (rP?.length) { const lp = await dbGetAll('pedidos'); for (const rped of rP) { const ex = lp.find(p => p.local_id === rped.local_id && rped.local_id); if (ex) { Object.assign(ex, { proveedor: rped.proveedor, estado: rped.estado, notas: rped.notas, lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por, modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en, synced: 1 }); await dbPut('pedidos', ex); } else if (!ex) { await dbAdd('pedidos', { proveedor: rped.proveedor, estado: rped.estado, notas: rped.notas, lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por, modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en, fecha: rped.fecha, local_id: rped.local_id, synced: 1 }); } } }
-        // Descargar fichajes remotos (imprescindible para que otros dispositivos vean la presencia)
-        const { data: rFichs } = await SB.from('fichajes').select('*').gt('created_at', lastPull);
+        if (rP?.length) { const lp = await dbGetAll('pedidos'); for (const rped of rP) { const ex = lp.find(p => p.remote_id === rped.id || (p.local_id === rped.local_id && rped.local_id)); if (ex) { Object.assign(ex, { proveedor: rped.proveedor, estado: rped.estado, notas: rped.notas, lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por, modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en, remote_id: rped.id, synced: 1 }); await dbPut('pedidos', ex); } else { await dbAdd('pedidos', { proveedor: rped.proveedor, estado: rped.estado, notas: rped.notas, lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por, modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en, fecha: rped.fecha, local_id: rped.local_id, remote_id: rped.id, synced: 1 }); } } }
+        // Descargar fichajes remotos: nuevos + ediciones/borrados hechos desde
+        // otro dispositivo (imprescindible para que la presencia se vea igual
+        // en todos los dispositivos, incluyendo correcciones del administrador).
+        const { data: rFichs } = await SB.from('fichajes').select('*').gt('updated_at', lastPull);
         if (rFichs?.length) {
             const lf = await dbGetAll('fichajes');
             for (const r of rFichs) {
-                if (!lf.find(f => f.local_id === r.local_id && r.local_id)) {
-                    await dbAdd('fichajes', { userId: r.user_id, nombreUsuario: r.nombre_usuario, rolUsuario: r.rol_usuario, tipo: r.tipo, fecha: r.fecha, fechaLocal: r.fecha_local, creadoPor: r.creado_por, dispositivo: r.dispositivo, nota: r.nota || '', local_id: r.local_id, sinc: 1 });
+                const ex = lf.find(f => f.remote_id === r.id || (f.local_id === r.local_id && r.local_id));
+                if (ex) {
+                    Object.assign(ex, { userId: r.user_id, nombreUsuario: r.nombre_usuario, rolUsuario: r.rol_usuario, tipo: r.tipo, fecha: r.fecha, fechaLocal: r.fecha_local, creadoPor: r.creado_por, modificadoPor: r.modificado_por, nota: r.nota || '', remote_id: r.id, sinc: 1 });
+                    await dbPut('fichajes', ex);
+                } else {
+                    await dbAdd('fichajes', { userId: r.user_id, nombreUsuario: r.nombre_usuario, rolUsuario: r.rol_usuario, tipo: r.tipo, fecha: r.fecha, fechaLocal: r.fecha_local, creadoPor: r.creado_por, modificadoPor: r.modificado_por, dispositivo: r.dispositivo, nota: r.nota || '', local_id: r.local_id, remote_id: r.id, sinc: 1 });
+                }
+            }
+        }
+        // Aplicar localmente los borrados hechos desde otro dispositivo (materiales,
+        // ubicaciones, usuarios, fichajes...). Postgres no notifica DELETEs por sí solo,
+        // así que se consulta el registro de "tumbas" y se replica el borrado aquí.
+        const { data: rBorrados } = await SB.from('registros_borrados').select('*').gt('borrado_en', lastPull).then(r => r).catch(() => ({ data: null }));
+        if (rBorrados?.length) {
+            const storesAfectados = [...new Set(rBorrados.map(d => d.tabla))];
+            for (const store of storesAfectados) {
+                if (!['materiales', 'ubicaciones', 'usuarios', 'fichajes'].includes(store)) continue;
+                const locales = await dbGetAll(store);
+                const idsBorrados = rBorrados.filter(d => d.tabla === store).map(d => d.remote_id);
+                for (const remoteId of idsBorrados) {
+                    const match = locales.find(r => r.remote_id === remoteId);
+                    if (match) await dbDelete(store, match.id);
+                }
+            }
+            // Si se borró una ubicación, limpiar la referencia en los materiales que la usaban
+            // (igual que hace el ON DELETE SET NULL en la nube)
+            if (storesAfectados.includes('ubicaciones')) {
+                const ubicsRestantes = new Set((await dbGetAll('ubicaciones')).map(u => u.id));
+                const matsLocales = await dbGetAll('materiales');
+                for (const m of matsLocales) {
+                    if (m.ubicacionId && !ubicsRestantes.has(m.ubicacionId)) {
+                        m.ubicacionId = null;
+                        await dbPut('materiales', m);
+                    }
                 }
             }
         }
@@ -523,6 +692,8 @@ function startRealtime() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, () => { pullRemoteData(); renderPedidos(); })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, () => pullRemoteData())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'config' }, async () => { await pullRemoteData(); if (typeof applyFichajeConfigUI === 'function') await applyFichajeConfigUI(); })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remote_commands' }, payload => { if (typeof handleRemoteCommand === 'function') handleRemoteCommand(payload.new); })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'remote_commands' }, () => { if (typeof renderRemoteCommandsLog === 'function' && document.getElementById('admin-reset')?.style.display === 'block') renderRemoteCommandsLog(); })
         .subscribe(st => { const el = document.getElementById('rt-status'); if (!el) return; el.textContent = st === 'SUBSCRIBED' ? '🟢 Tiempo real activo' : '🔴 ' + st; el.style.color = st === 'SUBSCRIBED' ? 'var(--success)' : 'var(--danger)'; });
 }
 function stopRealtime() { if (rtChannel && SB) { SB.removeChannel(rtChannel); rtChannel = null; } }
@@ -758,9 +929,9 @@ function initVoice() {
         if (hint) hint.textContent = '⚠️ Este navegador no permite acceso al micrófono.';
         return;
     }
-    // Precarga silenciosa del stack de voz en segundo plano.
-    // Primero intenta cargar Transformers de forma robusta y luego prepara el
-    // modelo Qwen para normalizar el texto reconocido, con Whisper como fallback.
+    // Precarga silenciosa del modelo Whisper "base" en segundo plano.
+    // La primera vez descarga ~140MB (se cachea en el navegador);
+    // las siguientes veces se carga instantáneamente desde caché, sin red.
     ensureWhisperLoaded().catch(() => { });
 }
 
@@ -786,7 +957,7 @@ async function ensureWhisperLoaded(onProgress) {
     }
     whisperLoading = true;
     try {
-        const mod = await loadTransformersLibrary();
+        const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
         const { pipeline, env } = mod;
         if (env) {
             env.allowRemoteModels = true;
@@ -978,9 +1149,10 @@ async function finishRecording() {
             updateWizVoiceText('No se detectó voz clara — inténtalo de nuevo', false);
             return;
         }
-        const normalizedDraft = normalizeNumbersInText(rawText);
-        const finalText = await normalizeVoiceTextWithQwen(normalizedDraft);
-        const text = normalizeNumbersInText(finalText || normalizedDraft);
+        // Corrige números dichos en palabras ("noventa"→90, "cuarenta y cinco"→45)
+        // antes de interpretar el texto, ya que muchos nombres de material los llevan
+        // (ej. "tubo 90", "codo 45").
+        const text = normalizeNumbersInText(rawText);
         updateWizVoiceText(text, false);
         wizProcessSpeech(text);
     } catch (e) {
@@ -1806,15 +1978,31 @@ async function addUser() {
     const pin = document.getElementById('newUserPin').value.trim();
     if (!n) { toast('Escribe el nombre', 'error'); return; }
     if (!/^\d{4}$/.test(pin)) { toast('PIN de 4 dígitos', 'error'); return; }
-    await dbAdd('usuarios', { nombre: n, rol, pin, creado: new Date().toISOString(), ...auditNuevo(), synced: 0 });
+    const { pinHash, pinSalt } = await makePinFields(pin);
+    await dbAdd('usuarios', { nombre: n, rol, pinHash, pinSalt, creado: new Date().toISOString(), ...auditNuevo(), synced: 0 });
     document.getElementById('newUserNombre').value = ''; document.getElementById('newUserPin').value = '';
     toast('✓ Usuario añadido', 'success'); renderAdmin(); scheduleSyncSoon();
 }
 
+// ── Borra un registro localmente y, si ya estaba sincronizado, también en
+//    la nube, dejando una "tumba" para que otros dispositivos lo repliquen. ──
+async function deleteRecordWithSync(store, localId, remoteId) {
+    if (remoteId && SB) {
+        try {
+            await SB.from(store).delete().eq('id', remoteId);
+            await SB.from('registros_borrados').insert({ tabla: store, remote_id: remoteId, borrado_por: currentUser?.nombre || '' });
+        } catch (e) { console.error(`Error al borrar ${store} remotamente:`, e); }
+    }
+    await dbDelete(store, localId);
+}
+
 async function deleteUser(id) {
     if (currentUser?.id === id) { toast('No puedes eliminarte a ti mismo', 'error'); return; }
+    const users = await dbGetAll('usuarios');
+    const u = users.find(x => x.id === id);
     showConfirmModal('Eliminar usuario', '<p style="font-size:13px;color:var(--text2);">¿Eliminar este usuario?</p>', async () => {
-        await dbDelete('usuarios', id); toast('Usuario eliminado', 'success'); renderAdmin();
+        await deleteRecordWithSync('usuarios', id, u?.remote_id);
+        toast('Usuario eliminado', 'success'); renderAdmin();
     });
 }
 
@@ -1840,7 +2028,8 @@ async function editUser(id) {
         const pin = document.getElementById('eu-pin').value.trim();
         if (!nombre) { toast('El nombre no puede estar vacío', 'error'); return; }
         if (pin && !/^\d{4}$/.test(pin)) { toast('El PIN debe ser 4 dígitos', 'error'); return; }
-        u.nombre = nombre; u.rol = rol; if (pin) u.pin = pin;
+        u.nombre = nombre; u.rol = rol;
+        if (pin) { const { pinHash, pinSalt } = await makePinFields(pin); u.pinHash = pinHash; u.pinSalt = pinSalt; delete u.pin; }
         Object.assign(u, auditMod()); u.synced = 0;
         await dbPut('usuarios', u);
         if (currentUser?.id === u.id) { currentUser = u; updateTopbarUser(); applyRoleUI(); }
@@ -1864,7 +2053,14 @@ async function addMaterial() {
     const de = document.getElementById('matDesc'); if (de) de.value = '';
     toast('✓ Material añadido', 'success'); renderAll(); scheduleSyncSoon();
 }
-async function deleteMaterial(id) { showConfirmModal('Eliminar material', '<p style="font-size:13px;color:var(--text2);">¿Eliminar este material?</p>', async () => { await dbDelete('materiales', id); toast('Eliminado', 'success'); renderAll(); }); }
+async function deleteMaterial(id) {
+    const mats = await dbGetAll('materiales');
+    const m = mats.find(x => x.id === id);
+    showConfirmModal('Eliminar material', '<p style="font-size:13px;color:var(--text2);">¿Eliminar este material?</p>', async () => {
+        await deleteRecordWithSync('materiales', id, m?.remote_id);
+        toast('Eliminado', 'success'); renderAll();
+    });
+}
 
 // ── EDITAR MATERIAL ──
 async function editMaterial(id) {
@@ -1919,7 +2115,22 @@ async function addUbicacion() {
     const dd = document.getElementById('ubicDesc'); if (dd) dd.value = '';
     toast('✓ Ubicación añadida', 'success'); renderAll(); scheduleSyncSoon();
 }
-async function deleteUbicacion(id) { await dbDelete('ubicaciones', id); toast('Eliminada', 'success'); renderAll(); }
+async function deleteUbicacion(id) {
+    const ubics = await dbGetAll('ubicaciones');
+    const u = ubics.find(x => x.id === id);
+    const mats = await dbGetAll('materiales');
+    const enUso = mats.filter(m => m.ubicacionId === id);
+    const aviso = enUso.length
+        ? `<p style="font-size:12px;color:var(--warn);margin-top:6px;">⚠️ ${enUso.length} material(es) usan esta ubicación y se quedarán sin asignar.</p>`
+        : '';
+    showConfirmModal('Eliminar ubicación',
+        `<p style="font-size:13px;color:var(--text2);">¿Eliminar esta ubicación?</p>${aviso}`,
+        async () => {
+            await deleteRecordWithSync('ubicaciones', id, u?.remote_id);
+            for (const m of enUso) { m.ubicacionId = null; m.synced = 0; await dbPut('materiales', m); }
+            toast('Eliminada', 'success'); renderAll(); scheduleSyncSoon();
+        }, 'Eliminar');
+}
 
 // ── EDITAR UBICACIÓN ──
 async function editUbicacion(id) {
@@ -1999,10 +2210,10 @@ async function loadSampleData() {
         for (const m of samples) { const id = await dbAdd('materiales', { ...m, ...audit0 }); await registerMovement(id, 'entrada', m.cantidad, m.ubicacionId, null, 'Stock inicial'); }
         // Añadir usuarios de ejemplo (incluye lector de presencia)
         const users = await dbGetAll('usuarios');
-        if (!users.find(u => u.nombre === 'Encargado')) { await dbAdd('usuarios', { nombre: 'Encargado', rol: 'encargado', pin: '1234', ...audit0 }); }
-        if (!users.find(u => u.nombre === 'Operario 1')) { await dbAdd('usuarios', { nombre: 'Operario 1', rol: 'operario', pin: '0000', ...audit0 }); }
-        if (!users.find(u => u.nombre === 'Operario 2')) { await dbAdd('usuarios', { nombre: 'Operario 2', rol: 'operario', pin: '1111', ...audit0 }); }
-        if (!users.find(u => u.nombre === 'Recepción')) { await dbAdd('usuarios', { nombre: 'Recepción', rol: 'lector_presencia', pin: '2222', ...audit0 }); }
+        if (!users.find(u => u.nombre === 'Encargado')) { const pf = await makePinFields('1234'); await dbAdd('usuarios', { nombre: 'Encargado', rol: 'encargado', pinHash: pf.pinHash, pinSalt: pf.pinSalt, ...audit0 }); }
+        if (!users.find(u => u.nombre === 'Operario 1')) { const pf = await makePinFields('0000'); await dbAdd('usuarios', { nombre: 'Operario 1', rol: 'operario', pinHash: pf.pinHash, pinSalt: pf.pinSalt, ...audit0 }); }
+        if (!users.find(u => u.nombre === 'Operario 2')) { const pf = await makePinFields('1111'); await dbAdd('usuarios', { nombre: 'Operario 2', rol: 'operario', pinHash: pf.pinHash, pinSalt: pf.pinSalt, ...audit0 }); }
+        if (!users.find(u => u.nombre === 'Recepción')) { const pf = await makePinFields('2222'); await dbAdd('usuarios', { nombre: 'Recepción', rol: 'lector_presencia', pinHash: pf.pinHash, pinSalt: pf.pinSalt, ...audit0 }); }
         toast('✓ Datos de ejemplo cargados', 'success'); renderAll(); scheduleSyncSoon();
     });
 }
@@ -2013,6 +2224,235 @@ async function clearAllData() {
         localStorage.removeItem('last_pull');
         toast('Datos eliminados', 'error'); doLogout();
     });
+}
+
+// ══════════════════════════════════════════════════════════
+// RESET / RESINCRONIZACIÓN — local y remota
+// Permite borrar los datos guardados en este dispositivo y/o
+// volver a descargarlos desde la nube, tabla por tabla o todas
+// a la vez. El administrador puede además enviar esta misma
+// orden al dispositivo de cualquier usuario que esté conectado,
+// aplicándose automáticamente en cuanto ese dispositivo tenga red.
+// ══════════════════════════════════════════════════════════
+const DATA_TABLES = [
+    { key: 'materiales', label: 'Materiales' },
+    { key: 'ubicaciones', label: 'Ubicaciones' },
+    { key: 'movimientos', label: 'Movimientos' },
+    { key: 'usuarios', label: 'Usuarios' },
+    { key: 'pedidos', label: 'Pedidos' },
+    { key: 'fichajes', label: 'Fichajes / Presencia' },
+    { key: 'config', label: 'Configuración' }
+];
+
+// ── Renderiza las cuadrículas de checkboxes (local y remoto) ──
+function renderDataTablesCheckboxes() {
+    const html = DATA_TABLES.map(t => `
+    <label class="reset-table-chip">
+      <input type="checkbox" id="dtb-%PREFIX%-${t.key}" checked>
+      ${t.label}
+    </label>`).join('');
+    const local = document.getElementById('local-tables-grid');
+    const remote = document.getElementById('remote-tables-grid');
+    if (local) local.innerHTML = html.replace(/%PREFIX%/g, 'local');
+    if (remote) remote.innerHTML = html.replace(/%PREFIX%/g, 'remote');
+}
+
+function getSelectedDataTables(prefix) {
+    return DATA_TABLES
+        .map(t => t.key)
+        .filter(key => document.getElementById(`dtb-${prefix}-${key}`)?.checked);
+}
+
+function selectAllDataTables(val, prefix) {
+    DATA_TABLES.forEach(t => {
+        const el = document.getElementById(`dtb-${prefix}-${t.key}`);
+        if (el) el.checked = val;
+    });
+}
+
+// ── Fuerza una descarga completa desde Supabase para las tablas indicadas ──
+// (En la práctica pullRemoteData() trae todas las tablas a la vez; para las
+// tablas no seleccionadas esto simplemente actualiza/fusiona sin duplicar,
+// y para las que sí se vaciaron antes, garantiza una copia limpia de la nube.)
+async function resyncTables(tableNames) {
+    if (!SB && !initSupabase()) { toast('Conecta Supabase primero en ☁️ Sync', 'error'); return false; }
+    const prevLastPull = localStorage.getItem('last_pull');
+    localStorage.setItem('last_pull', '1970-01-01T00:00:00Z'); // fuerza traer todo el histórico
+    try {
+        await pullRemoteData(); // ya deja last_pull actualizado a "ahora" al terminar
+        return true;
+    } catch (e) {
+        if (prevLastPull) localStorage.setItem('last_pull', prevLastPull);
+        console.error('resyncTables error:', e);
+        return false;
+    }
+}
+
+// Si se ha tocado la tabla 'usuarios', refresca el objeto currentUser en
+// memoria con el registro recién sincronizado (los ids locales cambian
+// tras un borrado, pero el remote_id de Supabase permanece estable).
+async function refreshCurrentUserAfterReset(tables) {
+    if (!tables.includes('usuarios') || !currentUser) return;
+    const users = await dbGetAll('usuarios');
+    const fresh = users.find(u => u.remote_id && currentUser.remote_id && u.remote_id === currentUser.remote_id)
+        || users.find(u => u.id === currentUser.id);
+    if (fresh) { currentUser = fresh; updateTopbarUser(); applyRoleUI(); }
+}
+
+// Refresca la pantalla activa tras un borrado/resincronización
+function refreshVisibleScreens() {
+    renderAll();
+    const fichScreen = document.getElementById('screen-fichaje');
+    if (fichScreen && fichScreen.classList.contains('active') && typeof renderFichaje === 'function') renderFichaje();
+}
+
+// ── Acción LOCAL: aplicar a este dispositivo ──
+async function applyLocalReset() {
+    const tables = getSelectedDataTables('local');
+    if (!tables.length) { toast('Selecciona al menos una tabla', 'error'); return; }
+    const wipe = document.getElementById('local-opt-wipe').checked;
+    const resync = document.getElementById('local-opt-resync').checked;
+    if (!wipe && !resync) { toast('Marca borrar y/o resincronizar', 'error'); return; }
+    if (resync && !navigator.onLine) { toast('Sin conexión a internet', 'error'); return; }
+
+    const labels = tables.map(k => DATA_TABLES.find(d => d.key === k)?.label || k).join(', ');
+    const warnUsuarios = tables.includes('usuarios') && wipe
+        ? '<p style="font-size:12px;color:var(--danger);margin-top:8px;">⚠️ Vas a borrar la tabla de Usuarios. Si no hay nube conectada para recuperarlos, se cerrará tu sesión.</p>' : '';
+
+    showConfirmModal('Confirmar acción',
+        `<p style="font-size:13px;color:var(--text2);">Tablas: <strong>${labels}</strong></p>
+     <p style="font-size:13px;color:var(--warn);margin-top:6px;">
+       ${wipe ? '🗑️ Se borrarán los datos locales de este dispositivo.<br>' : ''}
+       ${resync ? '☁️⬇️ Se volverán a descargar desde la nube.' : ''}
+     </p>${warnUsuarios}`,
+        async () => {
+            if (wipe) for (const t of tables) await dbClear(t);
+            if (resync) {
+                const ok = await resyncTables(tables);
+                if (!ok) { toast('No se pudo resincronizar — revisa la conexión', 'error'); }
+            }
+            await refreshCurrentUserAfterReset(tables);
+            refreshVisibleScreens();
+            toast('✓ Operación completada', 'success');
+        }, 'Aplicar');
+}
+
+// ── Selector de usuario objetivo para la orden remota ──
+async function populateRemoteTargetUserSelect() {
+    const sel = document.getElementById('remote-target-user');
+    if (!sel) return;
+    const users = await dbGetAll('usuarios');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— Seleccionar usuario —</option>' +
+        users.map(u => {
+            const r = ROLES[u.rol] || {};
+            const sinNube = !u.remote_id ? ' (sin sincronizar)' : '';
+            return `<option value="${u.id}">${r.emoji || ''} ${u.nombre}${sinNube}</option>`;
+        }).join('');
+    if (prev) sel.value = prev;
+}
+
+// ── Acción REMOTA: enviar orden al dispositivo de otro usuario ──
+async function sendRemoteResetCommand() {
+    const targetId = parseInt(document.getElementById('remote-target-user').value);
+    if (!targetId) { toast('Selecciona un usuario objetivo', 'error'); return; }
+    const tables = getSelectedDataTables('remote');
+    if (!tables.length) { toast('Selecciona al menos una tabla', 'error'); return; }
+    const wipe = document.getElementById('remote-opt-wipe').checked;
+    const resync = document.getElementById('remote-opt-resync').checked;
+    if (!wipe && !resync) { toast('Marca borrar y/o resincronizar', 'error'); return; }
+    if (!navigator.onLine) { toast('Sin conexión a internet', 'error'); return; }
+    if (!SB && !initSupabase()) { toast('Conecta Supabase primero en ☁️ Sync', 'error'); return; }
+
+    const users = await dbGetAll('usuarios');
+    const target = users.find(u => u.id === targetId);
+    if (!target) { toast('Usuario no encontrado', 'error'); return; }
+    if (!target.remote_id) { toast('Este usuario aún no se ha sincronizado con la nube — no se puede enviar la orden', 'error'); return; }
+
+    const action = wipe && resync ? 'wipe_resync' : wipe ? 'wipe' : 'resync';
+    const labels = tables.map(k => DATA_TABLES.find(d => d.key === k)?.label || k).join(', ');
+
+    showConfirmModal('Confirmar orden remota',
+        `<p style="font-size:13px;color:var(--text2);">Usuario: <strong>${target.nombre}</strong></p>
+     <p style="font-size:13px;color:var(--text2);margin-top:4px;">Tablas: <strong>${labels}</strong></p>
+     <p style="font-size:13px;color:var(--warn);margin-top:6px;">Se aplicará automáticamente en su dispositivo en cuanto tenga conexión.</p>`,
+        async () => {
+            const { error } = await SB.from('remote_commands').insert({
+                target_user_remote_id: target.remote_id,
+                target_user_nombre: target.nombre,
+                scope: tables,
+                action,
+                creado_por: currentUser?.nombre || ''
+            });
+            if (error) { toast('Error al enviar la orden: ' + error.message, 'error'); return; }
+            toast(`📡 Orden enviada a ${target.nombre}`, 'success');
+            await renderRemoteCommandsLog();
+        }, 'Enviar orden');
+}
+
+// ── Recibida en el dispositivo objetivo: ejecutar y confirmar ──
+async function handleRemoteCommand(cmd) {
+    if (!currentUser || !currentUser.remote_id) return;
+    if (cmd.target_user_remote_id !== currentUser.remote_id) return;
+    if (cmd.executed) return;
+
+    const scope = Array.isArray(cmd.scope) ? cmd.scope : [];
+    const tables = scope.includes('all') ? DATA_TABLES.map(d => d.key) : scope;
+    if (!tables.length) return;
+
+    toast('🔄 El administrador ha solicitado sincronizar tus datos…', '');
+
+    const doWipe = cmd.action === 'wipe' || cmd.action === 'wipe_resync';
+    const doResync = cmd.action === 'resync' || cmd.action === 'wipe_resync';
+
+    if (doWipe) for (const t of tables) await dbClear(t);
+    if (doResync) await resyncTables(tables);
+
+    await refreshCurrentUserAfterReset(tables);
+    refreshVisibleScreens();
+
+    toast('✓ Tus datos se han sincronizado por el administrador', 'success');
+
+    // Confirmar ejecución en la nube para que el admin vea el resultado
+    try {
+        await SB.from('remote_commands').update({
+            executed: true,
+            executed_at: new Date().toISOString(),
+            executed_device: navigator.userAgent.substring(0, 80)
+        }).eq('id', cmd.id);
+    } catch (e) { console.error('No se pudo confirmar la orden remota:', e); }
+}
+
+// ── Historial de órdenes remotas (vista admin) ──
+async function renderRemoteCommandsLog() {
+    const el = document.getElementById('remote-commands-log');
+    if (!el) return;
+    if (!SB && !initSupabase()) {
+        el.innerHTML = '<p style="color:var(--text3);font-size:13px;">Conecta Supabase para ver el historial</p>';
+        return;
+    }
+    try {
+        const { data, error } = await SB.from('remote_commands').select('*').order('created_at', { ascending: false }).limit(15);
+        if (error || !data?.length) {
+            el.innerHTML = '<p style="color:var(--text3);font-size:13px;">Sin órdenes enviadas todavía</p>';
+            return;
+        }
+        el.innerHTML = data.map(c => {
+            const scopeLabel = Array.isArray(c.scope) ? (c.scope.includes('all') ? 'Todo' : c.scope.map(k => DATA_TABLES.find(d => d.key === k)?.label || k).join(', ')) : c.scope;
+            const actionLabel = c.action === 'wipe' ? '🗑️ Borrar' : c.action === 'resync' ? '☁️⬇️ Resincronizar' : '🗑️☁️ Borrar y resincronizar';
+            const estado = c.executed
+                ? `<span style="color:var(--success);">✓ Ejecutada ${new Date(c.executed_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>`
+                : `<span style="color:var(--warn);">⏳ Pendiente de conexión</span>`;
+            return `<div style="background:var(--card);border:1px solid var(--border);border-radius:var(--rs);padding:10px 12px;margin-bottom:7px;font-size:12px;">
+        <div style="font-weight:700;margin-bottom:3px;">${c.target_user_nombre || '—'} — ${actionLabel}</div>
+        <div style="color:var(--text2);">Tablas: ${scopeLabel}</div>
+        <div style="color:var(--text3);margin-top:2px;">Solicitado por ${c.creado_por || '—'} · ${new Date(c.created_at).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+        <div style="margin-top:4px;">${estado}</div>
+      </div>`;
+        }).join('');
+    } catch (e) {
+        el.innerHTML = '<p style="color:var(--danger);font-size:13px;">Error al cargar el historial</p>';
+    }
 }
 
 // ══════════════════════════════════════════════
@@ -2037,9 +2477,11 @@ function setMovTab(tab) { currentMovTab = tab; document.querySelectorAll('#scree
 
 function setAdminTab(tab) {
     currentAdminTab = tab;
-    ['mat', 'ubic', 'users', 'sync', 'export'].forEach(t => { const el = document.getElementById('admin-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
-    document.querySelectorAll('#screen-admin .tabs .tab').forEach((t, i) => t.classList.toggle('active', ['mat', 'ubic', 'users', 'sync', 'export'][i] === tab));
-    if (tab === 'sync') renderSyncScreen(); else if (tab !== 'mat') renderAdmin();
+    ['mat', 'ubic', 'users', 'sync', 'reset', 'export'].forEach(t => { const el = document.getElementById('admin-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
+    document.querySelectorAll('#screen-admin .tabs .tab').forEach((t, i) => t.classList.toggle('active', ['mat', 'ubic', 'users', 'sync', 'reset', 'export'][i] === tab));
+    if (tab === 'sync') renderSyncScreen();
+    else if (tab === 'reset') { renderDataTablesCheckboxes(); populateRemoteTargetUserSelect(); renderRemoteCommandsLog(); }
+    else if (tab !== 'mat') renderAdmin();
 }
 
 function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
@@ -2052,10 +2494,12 @@ function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 let toastTimer;
-function toast(msg, type = '') {
-    const el = document.getElementById('toast');
-    el.textContent = msg; el.className = 'show ' + type;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = '', 5000);
+function toast(msg, type = '') { 
+    const el = document.getElementById('toast'); 
+    el.textContent = msg; 
+    el.className = 'show ' + type; 
+    clearTimeout(toastTimer); 
+    toastTimer = setTimeout(() => el.className = '', 3000); 
 }
 
 function updateNetStatus() {
@@ -3132,7 +3576,7 @@ async function renderAdminHistorial() {
     if (!tbody) return;
 
     if (!page.length) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;
       padding:24px;color:var(--text3);">Sin registros</td></tr>`;
         return;
     }
@@ -3176,6 +3620,10 @@ async function renderAdminHistorial() {
       <td><span class="fich-dur">${dur}</span></td>
       <td style="font-size:11px;color:var(--text3);max-width:120px;
           overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${nota}</td>
+      <td style="white-space:nowrap;">
+        <button onclick="editFichaje(${fich.id})" title="Editar" style="background:rgba(79,142,247,.12);border:1px solid rgba(79,142,247,.3);color:var(--accent);border-radius:6px;padding:5px 8px;cursor:pointer;font-size:11px;margin-right:4px;">✏️</button>
+        <button onclick="deleteFichaje(${fich.id})" title="Eliminar" style="background:rgba(231,76,60,.12);border:1px solid rgba(231,76,60,.3);color:var(--danger);border-radius:6px;padding:5px 8px;cursor:pointer;font-size:11px;">✕</button>
+      </td>
     </tr>`;
     }).join('');
 }
@@ -3183,6 +3631,85 @@ async function renderAdminHistorial() {
 function fHistPage(delta) {
     PRES.histPage = Math.max(0, PRES.histPage + delta);
     renderAdminHistorial();
+}
+
+// ══════════════════════════════════════════════════════════
+// EDITAR / ELIMINAR FICHAJES (administración)
+// ══════════════════════════════════════════════════════════
+async function editFichaje(id) {
+    const fichajes = await dbGetAll('fichajes');
+    const f = fichajes.find(x => x.id === id);
+    if (!f) return;
+    const usuarios = await dbGetAll('usuarios');
+    const fichables = usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado');
+    const userOpts = fichables.map(u => `<option value="${u.id}" ${f.userId === u.id ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('');
+
+    const dt = new Date(f.fecha);
+    const pad = n => String(n).padStart(2, '0');
+    const dtLocal = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+
+    document.getElementById('editModalTitle').textContent = 'Editar Fichaje';
+    document.getElementById('editModalBody').innerHTML = `
+    <div class="form-group"><label>Operario</label><select id="ef-user">${userOpts}</select></div>
+    <div class="form-group"><label>Tipo</label>
+      <select id="ef-tipo">
+        <option value="entrada" ${f.tipo === 'entrada' ? 'selected' : ''}>↑ Entrada</option>
+        <option value="salida" ${f.tipo === 'salida' ? 'selected' : ''}>↓ Salida</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Fecha y hora</label><input id="ef-fecha" type="datetime-local" value="${dtLocal}"></div>
+    <div class="form-group"><label>Nota</label><input id="ef-nota" type="text" value="${esc(f.nota || '')}" placeholder="Motivo, referencia..."></div>
+    <p style="font-size:11px;color:var(--text3);margin-top:6px;">Registrado por ${esc(f.creadoPor || '—')}${f.modificadoPor ? ' · última edición: ' + esc(f.modificadoPor) : ''}</p>`;
+
+    document.getElementById('editModalSave').onclick = async () => {
+        const userId = parseInt(document.getElementById('ef-user').value);
+        const tipo = document.getElementById('ef-tipo').value;
+        const fechaStr = document.getElementById('ef-fecha').value;
+        const nota = document.getElementById('ef-nota').value.trim();
+        if (!userId) { toast('Selecciona un operario', 'error'); return; }
+        if (!fechaStr) { toast('Indica fecha y hora', 'error'); return; }
+
+        const usuario = usuarios.find(u => u.id === userId);
+        f.userId = userId;
+        f.nombreUsuario = usuario?.nombre || f.nombreUsuario;
+        f.rolUsuario = usuario?.rol || f.rolUsuario;
+        f.tipo = tipo;
+        f.fecha = new Date(fechaStr).toISOString();
+        f.fechaLocal = new Date(fechaStr).toLocaleString('es-ES');
+        f.nota = nota;
+        f.modificadoPor = currentUser?.nombre || '';
+        f.sinc = 0;
+        await dbPut('fichajes', f);
+
+        closeModal('editModal');
+        toast('✓ Fichaje actualizado', 'success');
+        await renderAdminHistorial();
+        await renderAdminStats();
+        await renderAdminAhora();
+        if (PRES.adminTab === 'jornadas') await renderAdminJornadas();
+        scheduleSyncSoon();
+    };
+    document.getElementById('editModal').classList.add('open');
+}
+
+async function deleteFichaje(id) {
+    const fichajes = await dbGetAll('fichajes');
+    const f = fichajes.find(x => x.id === id);
+    if (!f) return;
+    showConfirmModal('Eliminar fichaje',
+        `<p style="font-size:13px;color:var(--text2);">Se eliminará el fichaje de <strong>${esc(f.nombreUsuario || '—')}</strong>
+     (${f.tipo === 'entrada' ? 'Entrada' : 'Salida'}, ${new Date(f.fecha).toLocaleString('es-ES')}).</p>
+     <p style="font-size:12px;color:var(--text3);margin-top:6px;">Esta acción no se puede deshacer.</p>`,
+        async () => {
+            // Si ya estaba sincronizado, se borra también en la nube y se deja
+            // constancia (tumba) para que otros dispositivos lo repliquen.
+            await deleteRecordWithSync('fichajes', id, f.remote_id);
+            toast('Fichaje eliminado', 'success');
+            await renderAdminHistorial();
+            await renderAdminStats();
+            await renderAdminAhora();
+            if (PRES.adminTab === 'jornadas') await renderAdminJornadas();
+        }, 'Eliminar');
 }
 
 // ── Tab Jornadas: resumen diario emparejando entradas/salidas ──
