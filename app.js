@@ -127,8 +127,11 @@ async function setConfigValue(key, value) {
 }
 function dbTx(store, mode, fn) {
     return new Promise((res, rej) => {
-        const tx = db.transaction(store, mode), s = tx.objectStore(store), req = fn(s);
-        req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error);
+        const tx = db.transaction(store, mode),
+         s = tx.objectStore(store), 
+         req = fn(s);
+        req.onsuccess = () => res(req.result); 
+        req.onerror = () => rej(req.error);
     });
 }
 const dbGetAll = store => dbTx(store, 'readonly', s => s.getAll());
@@ -563,10 +566,23 @@ async function syncNow() {
             if (!error) { mv.synced = 1; await dbPut('movimientos', mv); pushed++; }
         }
 
-        // push usuarios (el PIN nunca se sube en texto plano: solo hash+salt;
-        // si el usuario aún conservaba el campo antiguo `pin`, se limpia también en la nube)
+        // push usuarios — el PIN nunca se sube en texto plano, solo hash+salt.
+        // IMPORTANTE: los campos de PIN solo se incluyen en el envío cuando este
+        // dispositivo tiene realmente un hash local válido. Si se enviaran
+        // siempre (aunque fuera null), un simple cambio de nombre o rol en un
+        // usuario que todavía no se había migrado a hash (p.ej. nunca inició
+        // sesión desde que se añadió esta función) borraría en la nube su único
+        // PIN funcional sin haber generado nunca un hash de reemplazo, dejándolo
+        // sin poder entrar en ningún dispositivo — exactamente el fallo reportado.
         for (const u of users.filter(x => !x.synced)) {
-            const payload = { nombre: u.nombre, rol: u.rol, pin_hash: u.pinHash || null, pin_salt: u.pinSalt || null, pin: null, creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
+            const payload = { nombre: u.nombre, rol: u.rol, creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
+            if (u.pinHash && u.pinSalt) {
+                // Solo se toca el PIN remoto cuando hay un hash local real que subir;
+                // de paso se limpia el texto plano antiguo si todavía quedaba.
+                payload.pin_hash = u.pinHash;
+                payload.pin_salt = u.pinSalt;
+                payload.pin = null;
+            }
             if (u.remote_id) {
                 const { error } = await SB.from('usuarios').update(payload).eq('id', u.remote_id);
                 if (!error) { u.synced = 1; await dbPut('usuarios', u); }
@@ -618,15 +634,172 @@ async function pullRemoteData() {
     const lastPull = localStorage.getItem('last_pull') || '1970-01-01T00:00:00Z';
     try {
         const { data: rU } = await SB.from('ubicaciones').select('*').gt('updated_at', lastPull);
-        if (rU?.length) { const l = await dbGetAll('ubicaciones'); for (const ru of rU) { const ex = l.find(u => u.remote_id === ru.id || u.id === ru.local_id); if (ex) { Object.assign(ex, { nombre: ru.nombre, tipo: ru.tipo, direccion: ru.direccion, descripcion: ru.descripcion, creadoPor: ru.creado_por, modificadoPor: ru.modificado_por, modificadoEn: ru.modificado_en, remote_id: ru.id, synced: 1 }); await dbPut('ubicaciones', ex); } else { await dbAdd('ubicaciones', { nombre: ru.nombre, tipo: ru.tipo, direccion: ru.direccion, descripcion: ru.descripcion, remote_id: ru.id, local_id: ru.local_id, creadoPor: ru.creado_por, modificadoPor: ru.modificado_por, modificadoEn: ru.modificado_en, synced: 1, creado: ru.creado }); } } }
+        if (rU?.length) {
+            const l = await dbGetAll('ubicaciones');
+            for (const ru of rU) {
+                const ex = l.find(u => u.remote_id === ru.id || u.id === ru.local_id);
+                if (ex) {
+                    Object.assign(ex, {
+                        nombre: ru.nombre,
+                        tipo: ru.tipo,
+                        direccion: ru.direccion,
+                        descripcion: ru.descripcion,
+                        creadoPor: ru.creado_por,
+                        modificadoPor: ru.modificado_por,
+                        modificadoEn: ru.modificado_en,
+                        remote_id: ru.id,
+                        synced: 1
+                    }); await dbPut('ubicaciones', ex);
+                } else {
+                    await dbAdd('ubicaciones', {
+                        nombre: ru.nombre, tipo: ru.tipo,
+                        direccion: ru.direccion, descripcion: ru.descripcion,
+                        remote_id: ru.id, local_id: ru.local_id, creadoPor: ru.creado_por,
+                        modificadoPor: ru.modificado_por, modificadoEn: ru.modificado_en,
+                        synced: 1,
+                        creado: ru.creado
+                    });
+                }
+            }
+        }
         const { data: rM } = await SB.from('materiales').select('*').gt('updated_at', lastPull);
-        if (rM?.length) { const lm = await dbGetAll('materiales'); const lu = await dbGetAll('ubicaciones'); for (const rm of rM) { const ex = lm.find(m => m.remote_id === rm.id || m.id === rm.local_id); if (ex) { const ub = lu.find(u => u.remote_id === rm.ubicacion_id); Object.assign(ex, { nombre: rm.nombre, cantidad: rm.cantidad, unidad: rm.unidad, precio: rm.precio || 0, minimo: rm.minimo, proveedor: rm.proveedor || '', descripcion: rm.descripcion || '', ubicacionId: ub?.id || ex.ubicacionId, creadoPor: rm.creado_por, modificadoPor: rm.modificado_por, modificadoEn: rm.modificado_en, remote_id: rm.id, synced: 1 }); await dbPut('materiales', ex); } else { const ub = lu.find(u => u.remote_id === rm.ubicacion_id); await dbAdd('materiales', { nombre: rm.nombre, cantidad: rm.cantidad, unidad: rm.unidad, precio: rm.precio || 0, minimo: rm.minimo, proveedor: rm.proveedor || '', descripcion: rm.descripcion || '', remote_id: rm.id, local_id: rm.local_id, ubicacionId: ub?.id || null, creadoPor: rm.creado_por, modificadoPor: rm.modificado_por, modificadoEn: rm.modificado_en, synced: 1, creado: rm.creado }); } } }
+        if (rM?.length) {
+            const lm = await dbGetAll('materiales');
+            const lu = await dbGetAll('ubicaciones');
+            for (const rm of rM) {
+                const ex = lm.find(m => m.remote_id === rm.id || m.id === rm.local_id);
+                if (ex) {
+                    const ub = lu.find(u => u.remote_id === rm.ubicacion_id);
+                    Object.assign(ex, {
+                        nombre: rm.nombre, cantidad: rm.cantidad, unidad: rm.unidad,
+                        precio: rm.precio || 0, minimo: rm.minimo, proveedor: rm.proveedor || '',
+                        descripcion: rm.descripcion || '', ubicacionId: ub?.id || ex.ubicacionId,
+                        creadoPor: rm.creado_por, modificadoPor: rm.modificado_por,
+                        modificadoEn: rm.modificado_en, remote_id: rm.id, synced: 1
+                    });
+                    await dbPut('materiales', ex);
+                } else {
+                    const ub = lu.find(u => u.remote_id === rm.ubicacion_id);
+                    await dbAdd('materiales', {
+                        nombre: rm.nombre,
+                        cantidad: rm.cantidad,
+                        unidad: rm.unidad,
+                        precio: rm.precio || 0,
+                        minimo: rm.minimo,
+                        proveedor: rm.proveedor || '',
+                        descripcion: rm.descripcion || '',
+                        remote_id: rm.id,
+                        local_id: rm.local_id,
+                        ubicacionId: ub?.id || null,
+                        creadoPor: rm.creado_por,
+                        modificadoPor: rm.modificado_por,
+                        modificadoEn: rm.modificado_en,
+                        synced: 1,
+                        creado: rm.creado
+                    });
+                }
+            }
+        }
         const { data: rMv } = await SB.from('movimientos').select('*').gt('created_at', lastPull);
-        if (rMv?.length) { const lmv = await dbGetAll('movimientos'); const lmt = await dbGetAll('materiales'); const lub = await dbGetAll('ubicaciones'); for (const rm of rMv) { if (!lmv.find(m => m.local_id === rm.local_id && rm.local_id)) { const mt = lmt.find(m => m.remote_id === rm.material_id); const ub = lub.find(u => u.remote_id === rm.ubicacion_id); await dbAdd('movimientos', { tipo: rm.tipo, cantidad: rm.cantidad, nota: rm.nota, fecha: rm.fecha, usuario: rm.usuario, local_id: rm.local_id, materialId: mt?.id || null, ubicacionId: ub?.id || null, synced: 1 }); } } }
+        if (rMv?.length) {
+            const lmv = await dbGetAll('movimientos');
+            const lmt = await dbGetAll('materiales');
+            const lub = await dbGetAll('ubicaciones');
+            for (const rm of rMv) {
+                if (!lmv.find(m => m.local_id === rm.local_id && rm.local_id)) {
+                    const mt = lmt.find(m => m.remote_id === rm.material_id);
+                    const ub = lub.find(u => u.remote_id === rm.ubicacion_id);
+                    await dbAdd('movimientos', {
+                        tipo: rm.tipo,
+                        cantidad: rm.cantidad,
+                        nota: rm.nota,
+                        fecha: rm.fecha,
+                        usuario: rm.usuario,
+                        local_id: rm.local_id,
+                        materialId: mt?.id || null,
+                        ubicacionId: ub?.id || null,
+                        synced: 1
+                    });
+                }
+            }
+        }
         const { data: rUs } = await SB.from('usuarios').select('*').gt('updated_at', lastPull);
-        if (rUs?.length) { const lu = await dbGetAll('usuarios'); for (const ru of rUs) { const ex = lu.find(u => u.remote_id === ru.id || u.id === ru.local_id); if (ex) { ex.nombre = ru.nombre; ex.rol = ru.rol; if (ru.pin_hash) { ex.pinHash = ru.pin_hash; ex.pinSalt = ru.pin_salt; } delete ex.pin; ex.creadoPor = ru.creado_por; ex.modificadoPor = ru.modificado_por; ex.modificadoEn = ru.modificado_en; ex.remote_id = ru.id; ex.synced = 1; await dbPut('usuarios', ex); } else { await dbAdd('usuarios', { nombre: ru.nombre, rol: ru.rol, pinHash: ru.pin_hash || null, pinSalt: ru.pin_salt || null, remote_id: ru.id, local_id: ru.local_id, creadoPor: ru.creado_por, modificadoPor: ru.modificado_por, modificadoEn: ru.modificado_en, synced: 1, creado: ru.creado }); } } }
+        if (rUs?.length) {
+            const lu = await dbGetAll('usuarios');
+            for (const ru of rUs) {
+                const ex = lu.find(u => u.remote_id === ru.id || u.id === ru.local_id);
+                // Si la nube ya tiene hash, se adopta (caso normal). Si la nube todavía
+                // solo tiene el PIN antiguo en texto plano (cuentas creadas antes de
+                // añadir el hash, cuyo dispositivo original nunca volvió a sincronizar
+                // ese registro), se conserva ese texto plano localmente para que
+                // verifyPin() lo migre a hash automáticamente en el próximo login.
+                // Sin esto, un dispositivo nuevo (o tras borrar/resincronizar) se
+                // queda sin nada contra lo que comprobar el PIN y el login falla siempre.
+                if (ex) {
+                    ex.nombre = ru.nombre; ex.rol = ru.rol;
+                    if (ru.pin_hash) { ex.pinHash = ru.pin_hash; ex.pinSalt = ru.pin_salt; delete ex.pin; }
+                    else if (!ex.pinHash && ru.pin) {
+                        ex.pin = ru.pin;
+                    }
+                    ex.creadoPor = ru.creado_por;
+                    ex.modificadoPor = ru.modificado_por;
+                    ex.modificadoEn = ru.modificado_en;
+                    ex.remote_id = ru.id; ex.synced = 1;
+                    await dbPut('usuarios', ex);
+                } else {
+                    const nuevo = {
+                        nombre: ru.nombre,
+                        rol: ru.rol,
+                        remote_id: ru.id,
+                        local_id: ru.local_id,
+                        creadoPor: ru.creado_por,
+                        modificadoPor: ru.modificado_por,
+                        modificadoEn: ru.modificado_en,
+                        synced: 1,
+                        creado: ru.creado
+                    };
+                    if (ru.pin_hash) {
+                        nuevo.pinHash = ru.pin_hash;
+                        nuevo.pinSalt = ru.pin_salt;
+                    }
+                    else if (ru.pin) {
+                        nuevo.pin = ru.pin;
+                    }
+                    await dbAdd('usuarios', nuevo);
+                }
+            }
+        }
         const { data: rP } = await SB.from('pedidos').select('*').gt('updated_at', lastPull);
-        if (rP?.length) { const lp = await dbGetAll('pedidos'); for (const rped of rP) { const ex = lp.find(p => p.remote_id === rped.id || (p.local_id === rped.local_id && rped.local_id)); if (ex) { Object.assign(ex, { proveedor: rped.proveedor, estado: rped.estado, notas: rped.notas, lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por, modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en, remote_id: rped.id, synced: 1 }); await dbPut('pedidos', ex); } else { await dbAdd('pedidos', { proveedor: rped.proveedor, estado: rped.estado, notas: rped.notas, lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por, modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en, fecha: rped.fecha, local_id: rped.local_id, remote_id: rped.id, synced: 1 }); } } }
+        if (rP?.length) {
+            const lp = await dbGetAll('pedidos');
+            for (const rped of rP) {
+                const ex = lp.find(p => p.remote_id === rped.id || (p.local_id === rped.local_id && rped.local_id));
+                if (ex) {
+                    Object.assign(ex, {
+                        proveedor: rped.proveedor,
+                        estado: rped.estado, notas: rped.notas,
+                        lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por,
+                        modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en,
+                        remote_id: rped.id, synced: 1
+                    });
+                    await dbPut('pedidos', ex);
+                } else {
+                    await dbAdd('pedidos', {
+                        proveedor: rped.proveedor,
+                        estado: rped.estado,
+                        notas: rped.notas,
+                        lineas: rped.lineas,
+                        total: rped.total,
+                        creadoPor: rped.creado_por,
+                        modificadoPor: rped.modificado_por,
+                        modificadoEn: rped.modificado_en,
+                        fecha: rped.fecha,
+                        local_id: rped.local_id, remote_id: rped.id,
+                        synced: 1
+                    });
+                }
+            }
+        }
         // Descargar fichajes remotos: nuevos + ediciones/borrados hechos desde
         // otro dispositivo (imprescindible para que la presencia se vea igual
         // en todos los dispositivos, incluyendo correcciones del administrador).
@@ -636,10 +809,32 @@ async function pullRemoteData() {
             for (const r of rFichs) {
                 const ex = lf.find(f => f.remote_id === r.id || (f.local_id === r.local_id && r.local_id));
                 if (ex) {
-                    Object.assign(ex, { userId: r.user_id, nombreUsuario: r.nombre_usuario, rolUsuario: r.rol_usuario, tipo: r.tipo, fecha: r.fecha, fechaLocal: r.fecha_local, creadoPor: r.creado_por, modificadoPor: r.modificado_por, nota: r.nota || '', remote_id: r.id, sinc: 1 });
+                    Object.assign(ex, {
+                        userId: r.user_id,
+                        nombreUsuario: r.nombre_usuario,
+                        rolUsuario: r.rol_usuario,
+                        tipo: r.tipo, fecha: r.fecha,
+                        fechaLocal: r.fecha_local,
+                        creadoPor: r.creado_por,
+                        modificadoPor: r.modificado_por,
+                        nota: r.nota || '',
+                        remote_id: r.id, sinc: 1
+                    });
                     await dbPut('fichajes', ex);
                 } else {
-                    await dbAdd('fichajes', { userId: r.user_id, nombreUsuario: r.nombre_usuario, rolUsuario: r.rol_usuario, tipo: r.tipo, fecha: r.fecha, fechaLocal: r.fecha_local, creadoPor: r.creado_por, modificadoPor: r.modificado_por, dispositivo: r.dispositivo, nota: r.nota || '', local_id: r.local_id, remote_id: r.id, sinc: 1 });
+                    await dbAdd('fichajes', {
+                        userId: r.user_id,
+                        nombreUsuario: r.nombre_usuario,
+                        rolUsuario: r.rol_usuario,
+                        tipo: r.tipo, fecha: r.fecha,
+                        fechaLocal: r.fecha_local,
+                        creadoPor: r.creado_por,
+                        modificadoPor: r.modificado_por,
+                        dispositivo: r.dispositivo,
+                        nota: r.nota || '', local_id: r.local_id,
+                        remote_id: r.id,
+                        sinc: 1
+                    });
                 }
             }
         }
@@ -681,7 +876,9 @@ async function pullRemoteData() {
         localStorage.setItem('last_pull', new Date().toISOString());
         renderAll();
         if (typeof applyFichajeConfigUI === 'function') applyFichajeConfigUI();
-    } catch (e) { console.error('pull', e); }
+    } catch (e) {
+        console.error('pull', e);
+    }
 }
 
 function startRealtime() {
@@ -694,9 +891,20 @@ function startRealtime() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'config' }, async () => { await pullRemoteData(); if (typeof applyFichajeConfigUI === 'function') await applyFichajeConfigUI(); })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'remote_commands' }, payload => { if (typeof handleRemoteCommand === 'function') handleRemoteCommand(payload.new); })
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'remote_commands' }, () => { if (typeof renderRemoteCommandsLog === 'function' && document.getElementById('admin-reset')?.style.display === 'block') renderRemoteCommandsLog(); })
-        .subscribe(st => { const el = document.getElementById('rt-status'); if (!el) return; el.textContent = st === 'SUBSCRIBED' ? '🟢 Tiempo real activo' : '🔴 ' + st; el.style.color = st === 'SUBSCRIBED' ? 'var(--success)' : 'var(--danger)'; });
+        .subscribe(st => {
+            const el = document.getElementById('rt-status');
+            if (!el)
+                return;
+            el.textContent = st === 'SUBSCRIBED' ? '🟢 Tiempo real activo' : '🔴 ' + st;
+            el.style.color = st === 'SUBSCRIBED' ? 'var(--success)' : 'var(--danger)';
+        });
 }
-function stopRealtime() { if (rtChannel && SB) { SB.removeChannel(rtChannel); rtChannel = null; } }
+function stopRealtime() {
+    if (rtChannel && SB) {
+        SB.removeChannel(rtChannel);
+        rtChannel = null;
+    }
+}
 
 function saveSupabaseConfig() {
     const url = document.getElementById('sb-url').value.trim();
@@ -704,14 +912,24 @@ function saveSupabaseConfig() {
     if (!url || !key) { toast('Rellena URL y API Key', 'error'); return; }
     localStorage.setItem('sb_url', url); localStorage.setItem('sb_key', key);
     SB = null; stopRealtime();
-    if (initSupabase()) { toast('✓ Supabase conectado', 'success'); startRealtime(); syncNow(); renderSyncScreen(); }
+    if (initSupabase()) {
+        toast('✓ Supabase conectado', 'success'); startRealtime();
+        syncNow();
+        renderSyncScreen();
+    }
     else toast('Error al conectar', 'error');
 }
 function clearSupabaseConfig() {
-    showConfirmModal('Desconectar Supabase', '<p style="font-size:13px;color:var(--text2);">Los datos locales se conservan. Solo se elimina la conexión remota.</p>', () => {
-        localStorage.removeItem('sb_url'); localStorage.removeItem('sb_key'); localStorage.removeItem('last_pull');
-        stopRealtime(); SB = null; toast('Desconectado', 'success'); renderSyncScreen();
-    });
+    showConfirmModal('Desconectar Supabase',
+        '<p style="font-size:13px;color:var(--text2);">Los datos locales se conservan. Solo se elimina la conexión remota.</p>',
+        () => {
+            localStorage.removeItem('sb_url');
+            localStorage.removeItem('sb_key');
+            localStorage.removeItem('last_pull');
+            stopRealtime(); SB = null;
+            toast('Desconectado', 'success');
+            renderSyncScreen();
+        });
 }
 function renderSyncScreen() {
     const { url, key } = getSBConfig(); const c = !!(url && key);
@@ -959,14 +1177,8 @@ async function ensureWhisperLoaded(onProgress) {
     try {
         const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
         const { pipeline, env } = mod;
-        if (env) {
-            env.allowRemoteModels = true;
-            env.allowLocalModels = false;
-            env.useBrowserCache = true;
-            if (env.backends?.onnx?.wasm) {
-                env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/';
-            }
-        }
+        env.allowLocalModels = false;
+        env.useBrowserCache = true; // cachea el modelo tras la primera descarga → funciona offline después
         whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
             progress_callback: p => { if (onProgress) onProgress(p); }
         });
@@ -1943,9 +2155,10 @@ async function renderAdmin() {
         return `<div class="user-card">
       <div class="user-avatar" style="background:${r.color}22;color:${r.color};">${u.nombre.charAt(0).toUpperCase()}</div>
       <div class="user-info">
-        <h3>${u.nombre}</h3>
+        <h3>${u.local_id} - ${u.nombre}</h3>
         <p><span class="role-badge ${r.cls}">${r.emoji} ${r.label}</span></p>
         ${audit ? `<p style="font-size:10px;color:var(--text3);margin-top:3px;">${audit}</p>` : ''}
+        <p style="font-size:10px;color:var(--text3);margin-top:3px;">☁️ ${u.synced ? '🟢' : '🔴'} ${u.remote_id} </p>
       </div>
       <div style="display:flex;gap:5px;">
         ${(u.rol === 'operario' || u.rol === 'encargado') ? `<button onclick="showItemQrLabel(${u.id},'usuario')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px;" title="Imprimir credencial QR">🏷️</button>` : ''}
@@ -2494,12 +2707,12 @@ function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 let toastTimer;
-function toast(msg, type = '') { 
-    const el = document.getElementById('toast'); 
-    el.textContent = msg; 
-    el.className = 'show ' + type; 
-    clearTimeout(toastTimer); 
-    toastTimer = setTimeout(() => el.className = '', 3000); 
+function toast(msg, type = '') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'show ' + type;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.className = '', 3000);
 }
 
 function updateNetStatus() {
@@ -3505,7 +3718,7 @@ async function renderAdminAhora() {
         el.innerHTML = `<p style="color:var(--text3);font-size:13px;
                     text-align:center;padding:24px 0;">
       Nadie fichado ahora mismo</p>`;
-        
+        //return;
     }
 
     el.innerHTML = presentes.map(f => {
