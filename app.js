@@ -15,6 +15,7 @@ const CAN = {
     crearPedidos: r => r === 'admin' || r === 'encargado',
     aprobarPedidos: r => r === 'admin',
     gestionAdmin: r => r === 'admin',
+    gestionMtos: r => r === 'admin' || r === 'encargado',
     moverStock: r => true,
     verMovimientos: r => true,
     verFichajes: r => r === 'admin' || r === 'lector_presencia'
@@ -128,9 +129,9 @@ async function setConfigValue(key, value) {
 function dbTx(store, mode, fn) {
     return new Promise((res, rej) => {
         const tx = db.transaction(store, mode),
-         s = tx.objectStore(store), 
-         req = fn(s);
-        req.onsuccess = () => res(req.result); 
+            s = tx.objectStore(store),
+            req = fn(s);
+        req.onsuccess = () => res(req.result);
         req.onerror = () => rej(req.error);
     });
 }
@@ -249,7 +250,11 @@ async function connectCloudAndCheck() {
             toast('✓ Conectado — usuarios encontrados', 'success');
             showLoginUserSelect(usuarios);
         } else {
-            toast('☁️ Conectado, pero sin usuarios en la nube', '');
+            // Borrar los usuarios locales y volver a descargarlos
+            dbClear('usuarios');
+            localStorage.setItem('last_pull', null) ;
+            localStorage.removeItem('last_pull');
+            toast('☁️ Conectado, pero sin usuarios en la nube, vuelva a intentarlo', '');
             loginShowSection('first-setup');
             const notice = document.getElementById('cloud-empty-notice');
             if (notice) notice.style.display = 'block';
@@ -400,6 +405,7 @@ function applyRoleUI() {
     if (navbar) navbar.style.display = '';
     document.getElementById('nav-ped').style.display = CAN.verPedidos(rol) ? '' : 'none';
     document.getElementById('nav-admin').style.display = CAN.gestionAdmin(rol) ? '' : 'none';
+    document.getElementById('nav-mtos').style.display = CAN.gestionMtos(rol) ? '' : 'none';
     const opPedir = document.getElementById('op-pedir');
     if (opPedir) opPedir.style.display = CAN.crearPedidos(rol) ? '' : 'none';
     const nbF = document.getElementById('nav-fichaje'); if (nbF) nbF.style.display = CAN.verFichajes(rol) ? '' : 'none';
@@ -2091,14 +2097,56 @@ async function renderMovements() {
     }).join('');
 }
 
+
 async function renderAdmin() {
+    const lk = document.getElementById('lock-admin');
+    const ac = document.getElementById('admin-content');
     if (!hasPermiso('gestionAdmin')) {
-        const lk = document.getElementById('lock-admin'); const ac = document.getElementById('admin-content');
-        if (lk) lk.style.display = 'flex'; if (ac) ac.style.display = 'none'; return;
+
+        if (lk) lk.style.display = 'flex';
+        if (ac) ac.style.display = 'none';
+        return;
     }
-    const lk = document.getElementById('lock-admin'); const ac = document.getElementById('admin-content');
-    if (lk) lk.style.display = 'none'; if (ac) ac.style.display = 'block';
-    const [mats, ubics, users] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones'), dbGetAll('usuarios')]);
+    if (lk) lk.style.display = 'none';
+    if (ac) ac.style.display = 'block';
+
+    const [users] = await Promise.all([dbGetAll('usuarios')]);
+        
+    // User list — con auditoría y botón editar
+    const userList = document.getElementById('userList');
+    if (userList) userList.innerHTML = users.map(u => {
+        const r = ROLES[u.rol] || ROLES.operario; const audit = fmtAudit(u);
+        return `<div class="user-card">
+      <div class="user-avatar" style="background:${r.color}22;color:${r.color};">${u.nombre.charAt(0).toUpperCase()}</div>
+      <div class="user-info">
+        <h3>${u.local_id} - ${u.nombre}</h3>
+        <p><span class="role-badge ${r.cls}">${r.emoji} ${r.label}</span></p>
+        ${audit ? `<p style="font-size:10px;color:var(--text3);margin-top:3px;">${audit}</p>` : ''}
+        <p style="font-size:10px;color:var(--text3);margin-top:3px;">☁️ ${u.synced ? '🟢' : '🔴'} ${u.remote_id} </p>
+      </div>
+      <div style="display:flex;gap:5px;">
+        ${(u.rol === 'operario' || u.rol === 'encargado') ? `<button onclick="showItemQrLabel(${u.id},'usuario')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px;" title="Imprimir credencial QR">🏷️</button>` : ''}
+        <button onclick="editUser(${u.id})" style="background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.2);color:var(--accent);border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px;">✏️</button>
+        <button onclick="deleteUser(${u.id})" style="background:rgba(231,76,60,.15);border:none;color:var(--danger);border-radius:6px;padding:6px 9px;cursor:pointer;">✕</button>
+      </div>
+    </div>`;
+    }).join('');
+}
+
+
+async function renderMtos() {
+    const lk = document.getElementById('lock-mtos');
+    const ac = document.getElementById('mtos-content');
+    if (!hasPermiso('gestionMtos')) {
+
+        if (lk) lk.style.display = 'flex';
+        if (ac) ac.style.display = 'none';
+        return;
+    }
+    if (lk) lk.style.display = 'none';
+    if (ac) ac.style.display = 'block';
+
+    const [mats, ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
     const ubicMap = {}; ubics.forEach(u => ubicMap[u.id] = u);
 
     // Mat list — con descripción, auditoría y botón editar
@@ -2147,26 +2195,7 @@ async function renderAdmin() {
       </div>
     </div>`;
     }).join('') : '<p style="color:var(--text3);font-size:13px;">Sin ubicaciones</p>';
-
-    // User list — con auditoría y botón editar
-    const userList = document.getElementById('userList');
-    if (userList) userList.innerHTML = users.map(u => {
-        const r = ROLES[u.rol] || ROLES.operario; const audit = fmtAudit(u);
-        return `<div class="user-card">
-      <div class="user-avatar" style="background:${r.color}22;color:${r.color};">${u.nombre.charAt(0).toUpperCase()}</div>
-      <div class="user-info">
-        <h3>${u.local_id} - ${u.nombre}</h3>
-        <p><span class="role-badge ${r.cls}">${r.emoji} ${r.label}</span></p>
-        ${audit ? `<p style="font-size:10px;color:var(--text3);margin-top:3px;">${audit}</p>` : ''}
-        <p style="font-size:10px;color:var(--text3);margin-top:3px;">☁️ ${u.synced ? '🟢' : '🔴'} ${u.remote_id} </p>
-      </div>
-      <div style="display:flex;gap:5px;">
-        ${(u.rol === 'operario' || u.rol === 'encargado') ? `<button onclick="showItemQrLabel(${u.id},'usuario')" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px;" title="Imprimir credencial QR">🏷️</button>` : ''}
-        <button onclick="editUser(${u.id})" style="background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.2);color:var(--accent);border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px;">✏️</button>
-        <button onclick="deleteUser(${u.id})" style="background:rgba(231,76,60,.15);border:none;color:var(--danger);border-radius:6px;padding:6px 9px;cursor:pointer;">✕</button>
-      </div>
-    </div>`;
-    }).join('');
+   
 }
 
 async function updateStats() {
@@ -2674,27 +2703,42 @@ async function renderRemoteCommandsLog() {
 function showScreen(name) {
     if (name === 'ped' && !hasPermiso('verPedidos')) { toast('Sin permiso', 'error'); return; }
     if (name === 'admin' && !hasPermiso('gestionAdmin')) { toast('Solo administradores', 'error'); return; }
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    if (name === 'mtos' && !hasPermiso('gestionMtos')) { toast('Solo encargados y administradores', 'error'); return; }
+document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('screen-' + name).classList.add('active');
     const nb = document.getElementById('nav-' + name); if (nb) nb.classList.add('active');
     if (name === 'inv') renderInventory();
     else if (name === 'mov') renderMovements();
     else if (name === 'ped') renderPedidos();
+    else if (name === 'mtos') renderMtos(); 
     else if (name === 'admin') { renderAdmin(); updateStats(); }
     else if (name === 'qr') {/* QR screen rendered statically */ }
     else if (name === 'fichaje') renderFichaje();
 }
 
-function setMovTab(tab) { currentMovTab = tab; document.querySelectorAll('#screen-mov .tab').forEach((t, i) => t.classList.toggle('active', ['all', 'entrada', 'salida'][i] === tab)); renderMovements(); }
+function setMovTab(tab) {
+    currentMovTab = tab;
+    document.querySelectorAll('#screen-mov .tab').forEach((t, i) => t.classList.toggle('active', ['all', 'entrada', 'salida'][i] === tab));
+    renderMovements();
+}
 
 function setAdminTab(tab) {
     currentAdminTab = tab;
-    ['mat', 'ubic', 'users', 'sync', 'reset', 'export'].forEach(t => { const el = document.getElementById('admin-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
+    ['users', 'sync', 'reset'].forEach(t => { const el = document.getElementById('admin-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
     document.querySelectorAll('#screen-admin .tabs .tab').forEach((t, i) => t.classList.toggle('active', ['mat', 'ubic', 'users', 'sync', 'reset', 'export'][i] === tab));
     if (tab === 'sync') renderSyncScreen();
     else if (tab === 'reset') { renderDataTablesCheckboxes(); populateRemoteTargetUserSelect(); renderRemoteCommandsLog(); }
     else if (tab !== 'mat') renderAdmin();
+}
+
+function setMtosTab(tab) {
+    //currentAdminTab = tab;
+    ['mat', 'ubic', 'export'].forEach(t => { const el = document.getElementById('mtos-' + t); if (el) el.style.display = t === tab ? 'block' : 'none'; });
+    document.querySelectorAll('#screen-mtos .tabs .tab').forEach((t, i) => t.classList.toggle('active', ['mat', 'ubic', 'export'][i] === tab));
+    if (tab === 'sync') renderSyncScreen();
+    else if (tab === 'reset') { renderDataTablesCheckboxes(); populateRemoteTargetUserSelect(); renderRemoteCommandsLog(); }
+    else if (tab !== 'mat') renderMtos();
 }
 
 function showConfirmModal(title, body, onConfirm, confirmLabel = 'Confirmar') {
@@ -3754,7 +3798,7 @@ async function renderAdminAhora() {
         adminSel.innerHTML = '<option value="">— Seleccionar —</option>';
         usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado').forEach(u => {
             const o = document.createElement('option');
-            o.value = u.id; o.textContent = u.nombre;
+            o.value = u.local_id; o.textContent = u.local_id + ' - ' + u.nombre;
             adminSel.appendChild(o);
         });
     }
@@ -3795,7 +3839,8 @@ async function renderAdminHistorial() {
     }
 
     tbody.innerHTML = page.map(fich => {
-        const u = userMap[fich.userId] || { nombre: fich.nombreUsuario || '?', rol: 'operario' };
+        const u = userMap[fich.userId] || { id: fich.userId, nombre: fich.nombreUsuario || '?', rol: 'operario' };
+        const ui = userMap[fich.local_id] || {idFich: fich.local_id || '?', usuarioId: fich.userId || '?'};
         const r = ROLES[u.rol] || ROLES.operario;
         const tipo = fich.tipo === 'entrada'
             ? '<span class="fich-in">↑ ENTRADA</span>'
@@ -3822,6 +3867,14 @@ async function renderAdminHistorial() {
             : '—';
 
         return `<tr>
+        <td>            
+            <span style="font-size:11px;color:var(--text3);max-width:120px;
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${ui.idFich}
+            </span>
+            <span class="mini-av" style="font-size:1.2em;background:${r.color}22;color:${r.color};">
+            ${ui.usuarioId}
+            </span>
+      </td>
       <td>
         <span class="mini-av" style="background:${r.color}22;color:${r.color};">
           ${u.nombre.charAt(0).toUpperCase()}
@@ -3855,7 +3908,7 @@ async function editFichaje(id) {
     if (!f) return;
     const usuarios = await dbGetAll('usuarios');
     const fichables = usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado');
-    const userOpts = fichables.map(u => `<option value="${u.id}" ${f.userId === u.id ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('');
+    const userOpts = fichables.map(u => `<option value="${u.local_id}" ${f.userId === u.local_id ? 'selected' : ''}>${esc(u.local_id)} - ${esc(u.nombre)}</option>`).join('');
 
     const dt = new Date(f.fecha);
     const pad = n => String(n).padStart(2, '0');
@@ -3928,8 +3981,8 @@ async function deleteFichaje(id) {
 // ── Tab Jornadas: resumen diario emparejando entradas/salidas ──
 async function renderAdminJornadas() {
     const fichajes = await dbGetAll('fichajes');
-    const usuarios = await dbGetAll('usuarios');
-    const userMap = {}; usuarios.forEach(u => userMap[u.id] = u);
+    // const usuarios = await dbGetAll('usuarios');
+    // const userMap = {}; usuarios.forEach(u => userMap[u.id] = u);
 
     const userFilt = parseInt(document.getElementById('fjorn-user')?.value) || null;
     const weekVal = document.getElementById('fjorn-week')?.value || '';
@@ -3955,7 +4008,7 @@ async function renderAdminJornadas() {
     f.forEach(fich => {
         const dia = fich.fecha.substring(0, 10);
         const key = `${fich.userId}-${dia}`;
-        if (!jornadas[key]) jornadas[key] = { userId: fich.userId, dia, entradas: [], salidas: [] };
+        if (!jornadas[key]) jornadas[key] = {nombre:fich.nombreUsuario,rol:fich.rolUsuario, userId: fich.userId, dia, entradas: [], salidas: [] };
         if (fich.tipo === 'entrada') jornadas[key].entradas.push(fich.fecha);
         else jornadas[key].salidas.push(fich.fecha);
     });
@@ -3971,8 +4024,8 @@ async function renderAdminJornadas() {
     }
 
     tbody.innerHTML = rows.map(j => {
-        const u = userMap[j.userId] || { nombre: '?', rol: 'operario' };
-        const r = ROLES[u.rol] || ROLES.operario;
+        //const u = j userMap[j.userId] || { nombre: '?', rol: 'operario' };
+        const r = ROLES[j.rol] || ROLES.operario;
         const pE = j.entradas[0] || null;
         const uS = j.salidas[j.salidas.length - 1] || null;
         const horas = pE && uS ? calcDur(pE, uS) : (pE ? 'En curso' : '—');
@@ -3981,9 +4034,10 @@ async function renderAdminJornadas() {
         return `<tr>
       <td>
         <span class="mini-av" style="background:${r.color}22;color:${r.color};">
-          ${u.nombre.charAt(0).toUpperCase()}
+          ${j.nombre.charAt(0).toUpperCase()}
         </span>
-        <span style="color:var(--text);">${u.nombre}</span>
+        <span style="color:var(--text);">${j.userId} - </span>
+        <span style="color:var(--text);">${j.nombre}</span>
       </td>
       <td style="color:var(--text);white-space:nowrap;">${diaFmt}</td>
       <td style="color:var(--success);">
