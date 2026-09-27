@@ -3029,7 +3029,7 @@ async function handleQrResult(raw) {
 // fuera, salida si estaba dentro), sin mostrar registros de otros usuarios.
 async function handleQrFichaje(userId) {
     const usuarios = await dbGetAll('usuarios');
-    const usuario = usuarios.find(u => u.id === userId);
+    const usuario = usuarios.find(u => u.local_id === userId);
     if (!usuario) {
         toast('Usuario no encontrado en este dispositivo', 'error');
         return;
@@ -3204,10 +3204,10 @@ async function renderLabelsList() {
         else if (labelsTab === 'ubicaciones') sub = (item.tipo || '') + ' · ' + (item.direccion || '—');
         else sub = (ROLES[item.rol]?.label || item.rol);
         return `<div class="label-card">
-      <input type="checkbox" id="lbl-${i}" value="${item.id}" checked>
+      <input type="checkbox" id="lbl-${i}" value="${item.local_id}" checked>
       <div class="label-card-info">
         <h4>${item.nombre}</h4>
-        <p>${sub}</p>
+        <p>${item.local_id} - ${sub}</p>
       </div>
     </div>`;
     }).join('');
@@ -3231,7 +3231,7 @@ async function printLabels() {
     }
 
     const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => parseInt(cb.value));
-    const items = labelsData.filter(item => checked.includes(item.id));
+    const items = labelsData.filter(item => checked.includes(item.local_id));
     if (!items.length) {
         toast('Selecciona al menos una etiqueta', 'error');
         return;
@@ -3255,7 +3255,7 @@ async function printLabels() {
     for (const item of items) {
         const payload = JSON.stringify({
             type: labelsTab === 'materiales' ? 'material' : 'ubicacion',
-            id: item.id,
+            id: item.local_id,
             nombre: item.nombre
         });
 
@@ -3275,8 +3275,8 @@ async function printLabels() {
         div.innerHTML = `
       <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
       ${subtitle ? `<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>` : ''}
-      <div id="qrc-${item.id}" style="display:block;margin:0 auto;"></div>
-      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.id}</div>`;
+      <div id="qrc-${item.local_id}" style="display:block;margin:0 auto;"></div>
+      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.local_id}</div>`;
 
         wrapper.appendChild(div);
     }
@@ -3286,10 +3286,10 @@ async function printLabels() {
     for (const item of items) {
         const payload = JSON.stringify({
             type: labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario',
-            id: item.id,
+            id: item.local_id,
             nombre: item.nombre
         });
-        const canvas = printArea.querySelector(`#qrc-${item.id}`);
+        const canvas = printArea.querySelector(`#qrc-${item.local_id}`);
         if (canvas) {
             // try {
             //     var qrc = new QRCode(canvas, {
@@ -3764,11 +3764,17 @@ async function renderAdminStats() {
         .forEach(f => { ultPorUser[f.userId] = f; });
     const numPresentes = Object.values(ultPorUser).filter(f => f.tipo === 'entrada').length;
 
-    const setN = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    const setN = (id, v) => {
+        const el = document.getElementById(id);
+        if (el)
+            el.textContent = v;
+    };
+
     setN('ps-presentes', numPresentes);
-    setN('ps-hoy', fichajes.filter(f => f.fecha.startsWith(hoyStr)).length);
-    setN('ps-semana', fichajes.filter(f => new Date(f.fecha) >= lunes).length);
-    setN('ps-total', fichajes.length);
+    // setN('ps-presentes', numPresentes);
+    // setN('ps-hoy', fichajes.filter(f => f.fecha.startsWith(hoyStr)).length);
+    // setN('ps-semana', fichajes.filter(f => new Date(f.fecha) >= lunes).length);
+    // setN('ps-total', fichajes.length);
 }
 
 // ── Tab Ahora: lista de presentes con tiempo acumulado ──
@@ -4097,7 +4103,7 @@ async function populateAdminSelectors() {
         if (first) sel.appendChild(first.cloneNode(true));
         fichables.forEach(u => {
             const o = document.createElement('option');
-            o.value = u.id; o.textContent = u.nombre;
+            o.value = u.local_id; o.textContent = u.local_id + ' - ' + u.nombre;
             sel.appendChild(o);
         });
         if (prev) sel.value = prev;

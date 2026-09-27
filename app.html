@@ -671,8 +671,7 @@
           <div class="config-row">
             <div>
               <p class="config-title">Fichaje manual en lectores</p>
-              <p class="config-desc">Por defecto solo QR. Actívalo para permitir seleccionar operario a mano en los
-                dispositivos con rol Lector de Presencia.</p>
+              <p class="config-desc">Permitir fichaje manual, no solo mediante QR.</p>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="cfg-fichaje-manual" onchange="onToggleFichajeManual(this.checked)">
@@ -682,7 +681,7 @@
         </div>
 
         <!-- Stats resumen -->
-        <div class="pres-stats">
+        <!-- <div class="pres-stats">
           <div class="pres-stat">
             <div class="num" id="ps-presentes">0</div>
             <div class="lbl">Ahora</div>
@@ -699,11 +698,13 @@
             <div class="num" id="ps-total">0</div>
             <div class="lbl">Total</div>
           </div>
-        </div>
+        </div> -->
 
         <!-- Tabs -->
         <div class="pres-tabs">
-          <button class="pres-tab active" id="ptab-ahora" onclick="setPresentesTab('ahora')">🟢 Ahora</button>
+          <button class="pres-tab active" id="ptab-ahora" onclick="setPresentesTab('ahora')">
+            <div class="num" >🟢 Ahora  (<span id="ps-presentes">0</span>)</div>
+          </button>
           <button class="pres-tab" id="ptab-historial" onclick="setPresentesTab('historial')">📋 Historial</button>
           <button class="pres-tab" id="ptab-jornadas" onclick="setPresentesTab('jornadas')">⏱ Jornadas</button>
         </div>
