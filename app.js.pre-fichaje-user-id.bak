@@ -174,12 +174,11 @@ function loginShowSection(name) {
 // pero el cursor apunta a una fecha reciente de una sesión anterior,
 // pullRemoteData() normal solo trae lo que cambió DESPUÉS de esa fecha y
 // nunca redescarga usuarios que ya existían en la nube desde antes.
-async function pullRemoteDataFull({ fullFichajes = false } = {}) {
+async function pullRemoteDataFull() {
     const prevLastPull = localStorage.getItem('last_pull');
     localStorage.setItem('last_pull', '1970-01-01T00:00:00Z');
     try {
-        const ok = await pullRemoteData({ fullFichajes }); // respeta el resultado real del pull
-        if (!ok) throw new Error('El pull remoto no terminó correctamente');
+        await pullRemoteData(); // ya deja last_pull actualizado a "ahora" al terminar
         return true;
     } catch (e) {
         if (prevLastPull) localStorage.setItem('last_pull', prevLastPull);
@@ -479,7 +478,7 @@ create table if not exists materiales(id uuid primary key default gen_random_uui
 create table if not exists movimientos(id uuid primary key default gen_random_uuid(),local_id integer,tipo text not null,cantidad numeric not null,material_id uuid references materiales(id),ubicacion_id uuid references ubicaciones(id),fecha timestamptz default now(),usuario text,nota text,created_at timestamptz default now());
 create table if not exists usuarios(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,rol text default 'operario',pin_hash text,pin_salt text,creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists pedidos(id uuid primary key default gen_random_uuid(),local_id integer,proveedor text,estado text default 'pendiente',notas text,lineas jsonb,total numeric default 0,creado_por text,modificado_por text,modificado_en timestamptz,fecha timestamptz default now(),updated_at timestamptz default now());
-create table if not exists fichajes(id uuid primary key default gen_random_uuid(),local_id integer,user_id integer,user_remote_id uuid references usuarios(id) on delete set null,nombre_usuario text,rol_usuario text,tipo text not null,fecha timestamptz not null,fecha_local text,creado_por text,modificado_por text,dispositivo text,nota text,created_at timestamptz default now(),updated_at timestamptz default now());
+create table if not exists fichajes(id uuid primary key default gen_random_uuid(),local_id integer,user_id integer,nombre_usuario text,rol_usuario text,tipo text not null,fecha timestamptz not null,fecha_local text,creado_por text,modificado_por text,dispositivo text,nota text,created_at timestamptz default now(),updated_at timestamptz default now());
 create table if not exists config(key text primary key,value jsonb,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists remote_commands(id uuid primary key default gen_random_uuid(),target_user_remote_id uuid,target_user_nombre text,scope text[],action text,creado_por text,created_at timestamptz default now(),executed boolean default false,executed_at timestamptz,executed_device text);
 -- Registro genérico de eliminaciones ("tumbas"), para que otros dispositivos
@@ -510,8 +509,6 @@ alter table pedidos add column if not exists modificado_por text;
 alter table pedidos add column if not exists modificado_en timestamptz;
 alter table fichajes add column if not exists updated_at timestamptz default now();
 alter table fichajes add column if not exists modificado_por text;
-alter table fichajes add column if not exists user_remote_id uuid references usuarios(id) on delete set null;
-create index if not exists idx_fichajes_user_remote on fichajes(user_remote_id);
 -- Identidad global del registro de origen; local_id sigue siendo solo diagnóstico.
 do $$ declare t text; begin foreach t in array array['ubicaciones','materiales','movimientos','usuarios','pedidos','fichajes'] loop execute format('alter table %I add column if not exists client_uuid uuid default gen_random_uuid()', t); execute format('update %I set client_uuid=gen_random_uuid() where client_uuid is null', t); execute format('alter table %I alter column client_uuid set not null', t); execute format('create unique index if not exists %I on %I(client_uuid)', 'ux_'||t||'_client_uuid', t); end loop; end $$;
 
@@ -663,9 +660,7 @@ async function syncNow() {
         if (pushed > 0) toast(`☁️ ${pushed} movimientos subidos`, 'success');
         const fichs = await dbGetAll('fichajes');
         for (const f of fichs.filter(x => !x.sinc)) {
-            const fichaUser = (await dbGetAll('usuarios')).find(u => u.id === f.userId);
-            if (!fichaUser?.remote_id) { console.warn('Fichaje pendiente: el usuario aún no tiene remote_id', f.id, f.userId); continue; }
-            const payload = { client_uuid: f.client_uuid, user_id: null, user_remote_id: fichaUser.remote_id, nombre_usuario: f.nombreUsuario, rol_usuario: f.rolUsuario, tipo: f.tipo, fecha: f.fecha, fecha_local: f.fechaLocal, creado_por: f.creadoPor, dispositivo: f.dispositivo, nota: f.nota || '' };
+            const payload = { client_uuid: f.client_uuid, user_id: f.userId, nombre_usuario: f.nombreUsuario, rol_usuario: f.rolUsuario, tipo: f.tipo, fecha: f.fecha, fecha_local: f.fechaLocal, creado_por: f.creadoPor, dispositivo: f.dispositivo, nota: f.nota || '' };
             if (f.remote_id) {
                 // Ya existía en la nube (p.ej. se editó tras un sync previo) → actualizar por su id real
                 const { error } = await SB.from('fichajes').update(payload).eq('id', f.remote_id);
@@ -695,19 +690,7 @@ async function querySince(table, column, since) {
     return { data: data || [] };
 }
 
-async function queryAllFichajes() {
-    const rows = [];
-    const pageSize = 500;
-    for (let from = 0; ; from += pageSize) {
-        const { data, error } = await SB.from('fichajes').select('*').order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, from + pageSize - 1);
-        if (error) throw error;
-        rows.push(...(data || []));
-        if (!data || data.length < pageSize) break;
-    }
-    return { data: rows };
-}
-
-async function pullRemoteData({ fullFichajes = false } = {}) {
+async function pullRemoteData() {
     if (!SB) return;
     const lastPull = localStorage.getItem('last_pull') || '1970-01-01T00:00:00Z';
     const pullStartedAt = new Date().toISOString();
@@ -901,20 +884,15 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
         // Descargar fichajes remotos: nuevos + ediciones/borrados hechos desde
         // otro dispositivo (imprescindible para que la presencia se vea igual
         // en todos los dispositivos, incluyendo correcciones del administrador).
-        const { data: rFichs } = fullFichajes
-            ? await queryAllFichajes()
-            : await querySince('fichajes', 'updated_at', lastPull);
+        const { data: rFichs } = await querySince('fichajes', 'updated_at', lastPull);
         if (rFichs?.length) {
             const lf = await dbGetAll('fichajes');
-            const usersForFichajes = await dbGetAll('usuarios');
             for (const r of rFichs) {
                 const ex = lf.find(f => f.remote_id === r.id || (r.client_uuid && f.client_uuid === r.client_uuid));
                 if (ex && !ex.sinc) { ex.remote_id = r.id; ex.client_uuid = r.client_uuid || ex.client_uuid; console.warn('Conflicto de sync fichajes; se conserva el cambio local', ex.id); await dbPut('fichajes', ex); }
                 else if (ex) {
                     Object.assign(ex, {
-                        userId: usersForFichajes.find(u => u.remote_id === r.user_remote_id)?.id || null,
-                        userRemoteId: r.user_remote_id || null,
-                        legacyUserId: r.user_remote_id ? null : r.user_id,
+                        userId: r.user_id,
                         nombreUsuario: r.nombre_usuario,
                         rolUsuario: r.rol_usuario,
                         tipo: r.tipo, fecha: r.fecha,
@@ -927,9 +905,7 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                     await dbPut('fichajes', ex);
                 } else {
                     await dbAdd('fichajes', {
-                        userId: usersForFichajes.find(u => u.remote_id === r.user_remote_id)?.id || null,
-                        userRemoteId: r.user_remote_id || null,
-                        legacyUserId: r.user_remote_id ? null : r.user_id,
+                        userId: r.user_id,
                         nombreUsuario: r.nombre_usuario,
                         rolUsuario: r.rol_usuario,
                         tipo: r.tipo, fecha: r.fecha,
@@ -982,10 +958,8 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
         localStorage.setItem('last_pull', new Date(new Date(pullStartedAt).getTime() - 2000).toISOString());
         renderAll();
         if (typeof applyFichajeConfigUI === 'function') applyFichajeConfigUI();
-        return true;
     } catch (e) {
         console.error('pull', e);
-        return false;
     }
 }
 
@@ -2645,7 +2619,7 @@ async function resyncTables(tableNames) {
         toast('Conecta Supabase primero en ☁️ Sync', 'error');
         return false;
     }
-    const ok = await pullRemoteDataFull({ fullFichajes: tableNames.includes('fichajes') });
+    const ok = await pullRemoteDataFull();
     if (!ok)
         toast('No se pudo resincronizar — revisa la conexión', 'error');
     return ok;
@@ -2690,11 +2664,11 @@ async function applyLocalReset() {
      </p>${warnUsuarios}`,
         async () => {
             if (wipe) for (const t of tables) await dbClear(t);
-            const resyncOk = !resync || await resyncTables(tables);
+            if (resync)
+                await resyncTables(tables); // ya muestra su propio aviso si falla
             await refreshCurrentUserAfterReset(tables);
             refreshVisibleScreens();
-            if (resyncOk) toast('✓ Operación completada', 'success');
-            else toast('La limpieza se aplicó, pero no se pudo recuperar todo desde la nube. Vuelve a resincronizar.', 'error');
+            toast('✓ Operación completada', 'success');
         }, 'Aplicar');
 }
 
@@ -3114,14 +3088,9 @@ async function handleQrResult(raw) {
 // Detecta el estado actual del operario (dentro/fuera) y registra
 // automáticamente el tipo de movimiento contrario (entrada si estaba
 // fuera, salida si estaba dentro), sin mostrar registros de otros usuarios.
-async function handleQrFichaje(userRemoteId) {
+async function handleQrFichaje(userId) {
     const usuarios = await dbGetAll('usuarios');
-    const usuario = usuarios.find(u => u.remote_id === userRemoteId);
-    if (!usuario && /^\d+$/.test(String(userRemoteId))) {
-        toast('Credencial QR antigua: reimprime la etiqueta para usar el ID canónico', 'error');
-        return;
-    }
-    const userId = usuario?.id;
+    const usuario = usuarios.find(u => u.local_id === userId);
     if (!usuario) {
         toast('Usuario no encontrado en este dispositivo', 'error');
         return;
@@ -3296,10 +3265,10 @@ async function renderLabelsList() {
         else if (labelsTab === 'ubicaciones') sub = (item.tipo || '') + ' · ' + (item.direccion || '—');
         else sub = (ROLES[item.rol]?.label || item.rol);
         return `<div class="label-card">
-      <input type="checkbox" id="lbl-${i}" value="${item.id}" checked>
+      <input type="checkbox" id="lbl-${i}" value="${item.local_id}" checked>
       <div class="label-card-info">
         <h4>${item.nombre}</h4>
-        <p>${item.id} - ${sub}</p>
+        <p>${item.local_id} - ${sub}</p>
       </div>
     </div>`;
     }).join('');
@@ -3322,8 +3291,8 @@ async function printLabels() {
         );
     }
 
-    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => Number(cb.value));
-    const items = labelsData.filter(item => checked.includes(item.id));
+    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => parseInt(cb.value));
+    const items = labelsData.filter(item => checked.includes(item.local_id));
     if (!items.length) {
         toast('Selecciona al menos una etiqueta', 'error');
         return;
@@ -3452,7 +3421,6 @@ async function printLabels2() {
     const ubicMap = {}; ubics.forEach(u => ubicMap[u.id] = u);
 
     const qrType = labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario';
-    if (qrType === 'usuario' && items.some(item => !item.remote_id)) { toast('Sincroniza los usuarios antes de imprimir credenciales QR', 'error'); return; }
 
     const wrapper = document.createElement('div');
     wrapper.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;padding:8px;`;
@@ -3481,7 +3449,7 @@ async function printLabels2() {
       <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
       ${subtitle ? `<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>` : ''}
       <canvas id="qrc-${item.id}" style="display:block;margin:0 auto;"></canvas>
-      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${qrType === 'usuario' ? item.remote_id : item.id}</div>`;
+      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.id}</div>`;
 
         wrapper.appendChild(div);
     }
@@ -3489,8 +3457,7 @@ async function printLabels2() {
 
     // Generar QRs
     for (const item of items) {
-        const qrId = qrType === 'usuario' ? item.remote_id : item.id;
-        const payload = JSON.stringify({ type: qrType, id: qrId, nombre: item.nombre });
+        const payload = JSON.stringify({ type: qrType, id: item.id, nombre: item.nombre });
         const canvas = printArea.querySelector(`#qrc-${item.id}`);
         if (canvas) {
             try {
@@ -3766,7 +3733,6 @@ async function guardarFichaje({ userId, usuario, tipo, nota, creadoPor }) {
     const now = new Date().toISOString();
     const fichaje = {
         userId,
-        userRemoteId: usuario.remote_id || null,
         nombreUsuario: usuario.nombre,
         rolUsuario: usuario.rol,
         tipo,
@@ -3829,7 +3795,7 @@ async function recargarPresencia() {
 
     // Si Supabase disponible, forzar descarga primero
     if (typeof pullRemoteData === 'function' && navigator.onLine) {
-        await pullRemoteData({ fullFichajes: true });
+        await pullRemoteData();
     }
 
     await applyFichajeConfigUI();
@@ -3931,7 +3897,7 @@ async function renderAdminAhora() {
         adminSel.innerHTML = '<option value="">— Seleccionar —</option>';
         usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado').sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(u => {
             const o = document.createElement('option');
-            o.value = u.id; o.textContent = u.nombre;
+            o.value = u.local_id; o.textContent = u.local_id + ' - ' + u.nombre;
             adminSel.appendChild(o);
         });
     }
@@ -4041,7 +4007,7 @@ async function editFichaje(id) {
     if (!f) return;
     const usuarios = await dbGetAll('usuarios');
     const fichables = usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado');
-    const userOpts = fichables.map(u => `<option value="${u.id}" ${f.userId === u.id ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('');
+    const userOpts = fichables.map(u => `<option value="${u.local_id}" ${f.userId === u.local_id ? 'selected' : ''}>${esc(u.local_id)} - ${esc(u.nombre)}</option>`).join('');
 
     const dt = new Date(f.fecha);
     const pad = n => String(n).padStart(2, '0');
@@ -4070,7 +4036,6 @@ async function editFichaje(id) {
 
         const usuario = usuarios.find(u => u.id === userId);
         f.userId = userId;
-        f.userRemoteId = usuario?.remote_id || null;
         f.nombreUsuario = usuario?.nombre || f.nombreUsuario;
         f.rolUsuario = usuario?.rol || f.rolUsuario;
         f.tipo = tipo;
@@ -4199,7 +4164,7 @@ async function populateAdminSelectors() {
         if (first) sel.appendChild(first.cloneNode(true));
         fichables.forEach(u => {
             const o = document.createElement('option');
-            o.value = u.id; o.textContent = u.nombre;
+            o.value = u.local_id; o.textContent = u.local_id + ' - ' + u.nombre;
             sel.appendChild(o);
         });
         if (prev) sel.value = prev;
@@ -4215,11 +4180,7 @@ async function setPresentesTab(tab) {
         if (btn) btn.classList.toggle('active', t === tab);
         if (cnt) cnt.style.display = t === tab ? 'block' : 'none';
     });
-    if (tab === 'historial') {
-        PRES.histPage = 0;
-        if (navigator.onLine && SB) await pullRemoteData({ fullFichajes: true });
-        await renderAdminHistorial();
-    }
+    if (tab === 'historial') { PRES.histPage = 0; await renderAdminHistorial(); }
     if (tab === 'jornadas') await renderAdminJornadas();
 }
 
@@ -4247,13 +4208,10 @@ function iniciarRTFichajes() {
                 const r = payload.new;
                 if (!r) return;
                 const locales = await dbGetAll('fichajes');
-                const usuariosLocales = await dbGetAll('usuarios');
                 const existe = locales.find(f => f.remote_id === r.id || (r.client_uuid && f.client_uuid === r.client_uuid));
                 if (!existe) {
                     await dbAdd('fichajes', {
-                        userId: usuariosLocales.find(u => u.remote_id === r.user_remote_id)?.id || null,
-                        userRemoteId: r.user_remote_id || null,
-                        legacyUserId: r.user_remote_id ? null : r.user_id,
+                        userId: r.user_id,
                         nombreUsuario: r.nombre_usuario,
                         rolUsuario: r.rol_usuario,
                         tipo: r.tipo,

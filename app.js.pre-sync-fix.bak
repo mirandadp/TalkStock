@@ -136,7 +136,7 @@ function dbTx(store, mode, fn) {
     });
 }
 const dbGetAll = store => dbTx(store, 'readonly', s => s.getAll());
-const dbAdd = (store, data) => dbTx(store, 'readwrite', s => s.add(store === 'config' ? data : { ...data, client_uuid: data.client_uuid || crypto.randomUUID() }));
+const dbAdd = (store, data) => dbTx(store, 'readwrite', s => s.add(data));
 const dbPut = (store, data) => dbTx(store, 'readwrite', s => s.put(data));
 const dbDelete = (store, key) => dbTx(store, 'readwrite', s => s.delete(key));
 function dbClear(store) { return new Promise(res => { const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).clear(); tx.oncomplete = res; }); }
@@ -174,12 +174,11 @@ function loginShowSection(name) {
 // pero el cursor apunta a una fecha reciente de una sesión anterior,
 // pullRemoteData() normal solo trae lo que cambió DESPUÉS de esa fecha y
 // nunca redescarga usuarios que ya existían en la nube desde antes.
-async function pullRemoteDataFull({ fullFichajes = false } = {}) {
+async function pullRemoteDataFull() {
     const prevLastPull = localStorage.getItem('last_pull');
     localStorage.setItem('last_pull', '1970-01-01T00:00:00Z');
     try {
-        const ok = await pullRemoteData({ fullFichajes }); // respeta el resultado real del pull
-        if (!ok) throw new Error('El pull remoto no terminó correctamente');
+        await pullRemoteData(); // ya deja last_pull actualizado a "ahora" al terminar
         return true;
     } catch (e) {
         if (prevLastPull) localStorage.setItem('last_pull', prevLastPull);
@@ -479,7 +478,7 @@ create table if not exists materiales(id uuid primary key default gen_random_uui
 create table if not exists movimientos(id uuid primary key default gen_random_uuid(),local_id integer,tipo text not null,cantidad numeric not null,material_id uuid references materiales(id),ubicacion_id uuid references ubicaciones(id),fecha timestamptz default now(),usuario text,nota text,created_at timestamptz default now());
 create table if not exists usuarios(id uuid primary key default gen_random_uuid(),local_id integer,nombre text not null,rol text default 'operario',pin_hash text,pin_salt text,creado timestamptz default now(),creado_por text,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists pedidos(id uuid primary key default gen_random_uuid(),local_id integer,proveedor text,estado text default 'pendiente',notas text,lineas jsonb,total numeric default 0,creado_por text,modificado_por text,modificado_en timestamptz,fecha timestamptz default now(),updated_at timestamptz default now());
-create table if not exists fichajes(id uuid primary key default gen_random_uuid(),local_id integer,user_id integer,user_remote_id uuid references usuarios(id) on delete set null,nombre_usuario text,rol_usuario text,tipo text not null,fecha timestamptz not null,fecha_local text,creado_por text,modificado_por text,dispositivo text,nota text,created_at timestamptz default now(),updated_at timestamptz default now());
+create table if not exists fichajes(id uuid primary key default gen_random_uuid(),local_id integer,user_id integer,nombre_usuario text,rol_usuario text,tipo text not null,fecha timestamptz not null,fecha_local text,creado_por text,modificado_por text,dispositivo text,nota text,created_at timestamptz default now(),updated_at timestamptz default now());
 create table if not exists config(key text primary key,value jsonb,modificado_por text,modificado_en timestamptz,updated_at timestamptz default now());
 create table if not exists remote_commands(id uuid primary key default gen_random_uuid(),target_user_remote_id uuid,target_user_nombre text,scope text[],action text,creado_por text,created_at timestamptz default now(),executed boolean default false,executed_at timestamptz,executed_device text);
 -- Registro genérico de eliminaciones ("tumbas"), para que otros dispositivos
@@ -510,10 +509,6 @@ alter table pedidos add column if not exists modificado_por text;
 alter table pedidos add column if not exists modificado_en timestamptz;
 alter table fichajes add column if not exists updated_at timestamptz default now();
 alter table fichajes add column if not exists modificado_por text;
-alter table fichajes add column if not exists user_remote_id uuid references usuarios(id) on delete set null;
-create index if not exists idx_fichajes_user_remote on fichajes(user_remote_id);
--- Identidad global del registro de origen; local_id sigue siendo solo diagnóstico.
-do $$ declare t text; begin foreach t in array array['ubicaciones','materiales','movimientos','usuarios','pedidos','fichajes'] loop execute format('alter table %I add column if not exists client_uuid uuid default gen_random_uuid()', t); execute format('update %I set client_uuid=gen_random_uuid() where client_uuid is null', t); execute format('alter table %I alter column client_uuid set not null', t); execute format('create unique index if not exists %I on %I(client_uuid)', 'ux_'||t||'_client_uuid', t); end loop; end $$;
 
 create index if not exists idx_fichajes_user on fichajes(user_id);
 create index if not exists idx_fichajes_fecha on fichajes(fecha);
@@ -554,33 +549,12 @@ alter publication supabase_realtime add table remote_commands;`.trim();
 function getSBConfig() { return { url: localStorage.getItem('sb_url') || '', key: localStorage.getItem('sb_key') || '' }; }
 function initSupabase() { const { url, key } = getSBConfig(); if (!url || !key) return false; try { SB = window.supabase.createClient(url, key); return true; } catch (e) { return false; } }
 
-async function commitSyncSuccess(store, snapshot, remoteId, syncField) {
-    const current = (await dbGetAll(store)).find(row => row.id === snapshot.id);
-    if (!current) return;
-    const clean = row => Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'synced' && key !== 'sinc'));
-    const unchanged = JSON.stringify(clean(current)) === JSON.stringify(clean(snapshot));
-    if (remoteId) current.remote_id = remoteId;
-    if (snapshot.client_uuid) current.client_uuid = snapshot.client_uuid;
-    current[syncField] = unchanged ? 1 : 0;
-    await dbPut(store, current);
-    if (!unchanged) console.warn('El registro cambió durante el sync; queda pendiente', store, snapshot.id);
-}
-
 async function syncNow() {
     if (!navigator.onLine) { toast('Sin conexión', 'error'); return; }
     if (!SB && !initSupabase()) { toast('⚙️ Configura Supabase en Admin → ☁️', 'error'); return; }
     if (syncBusy) return; syncBusy = true;
     try {
         const [ubics, mats, movs, users, peds] = await Promise.all([dbGetAll('ubicaciones'), dbGetAll('materiales'), dbGetAll('movimientos'), dbGetAll('usuarios'), dbGetAll('pedidos')]);
-        for (const [store, rows] of [['ubicaciones', ubics], ['materiales', mats], ['movimientos', movs], ['usuarios', users], ['pedidos', peds], ['fichajes', await dbGetAll('fichajes')]]) {
-            for (const row of rows) {
-                let changed = false;
-                if (!row.client_uuid) { row.client_uuid = crypto.randomUUID(); changed = true; }
-                const flag = store === 'fichajes' ? 'sinc' : 'synced';
-                if (row[flag] === undefined && store !== 'config') { row[flag] = row.remote_id ? 1 : 0; changed = true; }
-                if (changed) await dbPut(store, row);
-            }
-        }
 
         // NOTA: se usa "insertar si es nuevo, actualizar por remote_id si ya existía"
         // en vez de upsert(...,{onConflict:'local_id'}). local_id es solo un contador
@@ -590,13 +564,13 @@ async function syncNow() {
 
         // push ubicaciones
         for (const u of ubics.filter(x => !x.synced)) {
-            const payload = { client_uuid: u.client_uuid, nombre: u.nombre, tipo: u.tipo, direccion: u.direccion || '', descripcion: u.descripcion || '', creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
+            const payload = { nombre: u.nombre, tipo: u.tipo, direccion: u.direccion || '', descripcion: u.descripcion || '', creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
             if (u.remote_id) {
                 const { error } = await SB.from('ubicaciones').update(payload).eq('id', u.remote_id);
-                if (!error) await commitSyncSuccess('ubicaciones', u, u.remote_id, 'synced');
+                if (!error) { u.synced = 1; await dbPut('ubicaciones', u); }
             } else {
-                const { data, error } = await SB.from('ubicaciones').upsert({ ...payload, local_id: u.id, creado: u.creado }, { onConflict: 'client_uuid' }).select().single();
-                if (!error && data) await commitSyncSuccess('ubicaciones', u, data.id, 'synced');
+                const { data, error } = await SB.from('ubicaciones').insert({ ...payload, local_id: u.id, creado: u.creado }).select().single();
+                if (!error && data) { u.synced = 1; u.remote_id = data.id; await dbPut('ubicaciones', u); }
             }
         }
         const ubicsSynced = await dbGetAll('ubicaciones');
@@ -604,13 +578,13 @@ async function syncNow() {
         // push materiales
         for (const m of mats.filter(x => !x.synced)) {
             const ub = ubicsSynced.find(u => u.id === m.ubicacionId);
-            const payload = { client_uuid: m.client_uuid, nombre: m.nombre, cantidad: m.cantidad, unidad: m.unidad || 'ud', precio: m.precio || 0, minimo: m.minimo || 0, proveedor: m.proveedor || '', descripcion: m.descripcion || '', ubicacion_id: ub?.remote_id || null, creado_por: m.creadoPor || '', modificado_por: m.modificadoPor || '', modificado_en: m.modificadoEn || null };
+            const payload = { nombre: m.nombre, cantidad: m.cantidad, unidad: m.unidad || 'ud', precio: m.precio || 0, minimo: m.minimo || 0, proveedor: m.proveedor || '', descripcion: m.descripcion || '', ubicacion_id: ub?.remote_id || null, creado_por: m.creadoPor || '', modificado_por: m.modificadoPor || '', modificado_en: m.modificadoEn || null };
             if (m.remote_id) {
                 const { error } = await SB.from('materiales').update(payload).eq('id', m.remote_id);
-                if (!error) await commitSyncSuccess('materiales', m, m.remote_id, 'synced');
+                if (!error) { m.synced = 1; await dbPut('materiales', m); }
             } else {
-                const { data, error } = await SB.from('materiales').upsert({ ...payload, local_id: m.id, creado: m.creado }, { onConflict: 'client_uuid' }).select().single();
-                if (!error && data) await commitSyncSuccess('materiales', m, data.id, 'synced');
+                const { data, error } = await SB.from('materiales').insert({ ...payload, local_id: m.id, creado: m.creado }).select().single();
+                if (!error && data) { m.synced = 1; m.remote_id = data.id; await dbPut('materiales', m); }
             }
         }
         const matsSynced = await dbGetAll('materiales');
@@ -619,8 +593,8 @@ async function syncNow() {
         let pushed = 0;
         for (const mv of movs.filter(x => !x.synced)) {
             const mt = matsSynced.find(m => m.id === mv.materialId); const ub = ubicsSynced.find(u => u.id === mv.ubicacionId);
-            const { data, error } = await SB.from('movimientos').upsert({ client_uuid: mv.client_uuid, tipo: mv.tipo, cantidad: mv.cantidad, nota: mv.nota || '', fecha: mv.fecha, usuario: mv.usuario || '', local_id: mv.id, material_id: mt?.remote_id || null, ubicacion_id: ub?.remote_id || null }, { onConflict: 'client_uuid' }).select().single();
-            if (!error && data) { mv.synced = 1; mv.remote_id = data.id; await dbPut('movimientos', mv); pushed++; }
+            const { error } = await SB.from('movimientos').insert({ tipo: mv.tipo, cantidad: mv.cantidad, nota: mv.nota || '', fecha: mv.fecha, usuario: mv.usuario || '', local_id: mv.id, material_id: mt?.remote_id || null, ubicacion_id: ub?.remote_id || null });
+            if (!error) { mv.synced = 1; await dbPut('movimientos', mv); pushed++; }
         }
 
         // push usuarios — el PIN nunca se sube en texto plano, solo hash+salt.
@@ -632,7 +606,7 @@ async function syncNow() {
         // PIN funcional sin haber generado nunca un hash de reemplazo, dejándolo
         // sin poder entrar en ningún dispositivo — exactamente el fallo reportado.
         for (const u of users.filter(x => !x.synced)) {
-            const payload = { client_uuid: u.client_uuid, nombre: u.nombre, rol: u.rol, creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
+            const payload = { nombre: u.nombre, rol: u.rol, creado_por: u.creadoPor || '', modificado_por: u.modificadoPor || '', modificado_en: u.modificadoEn || null };
             if (u.pinHash && u.pinSalt) {
                 // Solo se toca el PIN remoto cuando hay un hash local real que subir;
                 // de paso se limpia el texto plano antiguo si todavía quedaba.
@@ -642,39 +616,37 @@ async function syncNow() {
             }
             if (u.remote_id) {
                 const { error } = await SB.from('usuarios').update(payload).eq('id', u.remote_id);
-                if (!error) await commitSyncSuccess('usuarios', u, u.remote_id, 'synced');
+                if (!error) { u.synced = 1; await dbPut('usuarios', u); }
             } else {
-                const { data, error } = await SB.from('usuarios').upsert({ ...payload, local_id: u.id, creado: u.creado }, { onConflict: 'client_uuid' }).select().single();
-                if (!error && data) await commitSyncSuccess('usuarios', u, data.id, 'synced');
+                const { data, error } = await SB.from('usuarios').insert({ ...payload, local_id: u.id, creado: u.creado }).select().single();
+                if (!error && data) { u.synced = 1; u.remote_id = data.id; await dbPut('usuarios', u); }
             }
         }
 
         // push pedidos
         for (const p of peds.filter(x => !x.synced)) {
-            const payload = { client_uuid: p.client_uuid, proveedor: p.proveedor || '', estado: p.estado, notas: p.notas || '', lineas: p.lineas || [], total: p.total || 0, creado_por: p.creadoPor || '', modificado_por: p.modificadoPor || '', modificado_en: p.modificadoEn || null };
+            const payload = { proveedor: p.proveedor || '', estado: p.estado, notas: p.notas || '', lineas: p.lineas || [], total: p.total || 0, creado_por: p.creadoPor || '', modificado_por: p.modificadoPor || '', modificado_en: p.modificadoEn || null };
             if (p.remote_id) {
                 const { error } = await SB.from('pedidos').update(payload).eq('id', p.remote_id);
-                if (!error) await commitSyncSuccess('pedidos', p, p.remote_id, 'synced');
+                if (!error) { p.synced = 1; await dbPut('pedidos', p); }
             } else {
-                const { data, error } = await SB.from('pedidos').upsert({ ...payload, local_id: p.id, fecha: p.fecha }, { onConflict: 'client_uuid' }).select().single();
-                if (!error && data) await commitSyncSuccess('pedidos', p, data.id, 'synced');
+                const { data, error } = await SB.from('pedidos').insert({ ...payload, local_id: p.id, fecha: p.fecha }).select().single();
+                if (!error && data) { p.synced = 1; p.remote_id = data.id; await dbPut('pedidos', p); }
             }
         }
         if (pushed > 0) toast(`☁️ ${pushed} movimientos subidos`, 'success');
         const fichs = await dbGetAll('fichajes');
         for (const f of fichs.filter(x => !x.sinc)) {
-            const fichaUser = (await dbGetAll('usuarios')).find(u => u.id === f.userId);
-            if (!fichaUser?.remote_id) { console.warn('Fichaje pendiente: el usuario aún no tiene remote_id', f.id, f.userId); continue; }
-            const payload = { client_uuid: f.client_uuid, user_id: null, user_remote_id: fichaUser.remote_id, nombre_usuario: f.nombreUsuario, rol_usuario: f.rolUsuario, tipo: f.tipo, fecha: f.fecha, fecha_local: f.fechaLocal, creado_por: f.creadoPor, dispositivo: f.dispositivo, nota: f.nota || '' };
+            const payload = { user_id: f.userId, nombre_usuario: f.nombreUsuario, rol_usuario: f.rolUsuario, tipo: f.tipo, fecha: f.fecha, fecha_local: f.fechaLocal, creado_por: f.creadoPor, dispositivo: f.dispositivo, nota: f.nota || '' };
             if (f.remote_id) {
                 // Ya existía en la nube (p.ej. se editó tras un sync previo) → actualizar por su id real
                 const { error } = await SB.from('fichajes').update(payload).eq('id', f.remote_id);
-                if (!error) await commitSyncSuccess('fichajes', f, f.remote_id, 'sinc');
+                if (!error) { f.sinc = 1; await dbPut('fichajes', f); }
             } else {
                 // Primer envío: insert simple (local_id no es único entre dispositivos,
                 // así que no se usa upsert/onConflict aquí)
-                const { data, error } = await SB.from('fichajes').upsert({ ...payload, local_id: f.id }, { onConflict: 'client_uuid' }).select().single();
-                if (!error && data) await commitSyncSuccess('fichajes', f, data.id, 'sinc');
+                const { data, error } = await SB.from('fichajes').insert({ ...payload, local_id: f.id }).select().single();
+                if (!error && data) { f.sinc = 1; f.remote_id = data.id; await dbPut('fichajes', f); }
             }
         }
         // push config (ajustes globales, ej. permitir fichaje manual)
@@ -683,42 +655,21 @@ async function syncNow() {
             const { error } = await SB.from('config').upsert({ key: c.key, value: c.value, modificado_por: c.modificadoPor || '', modificado_en: c.modificadoEn || null }, { onConflict: 'key' });
             if (!error) { c.synced = 1; await dbPut('config', c); }
         }
-        await flushRemoteDeletes();
         await pullRemoteData();
     } catch (e) { toast('Error sync: ' + (e.message || e), 'error'); }
     finally { syncBusy = false; updateSyncBadge(); updateStats(); }
 }
 
-async function querySince(table, column, since) {
-    const { data, error } = await SB.from(table).select('*').gt(column, since);
-    if (error) throw error;
-    return { data: data || [] };
-}
-
-async function queryAllFichajes() {
-    const rows = [];
-    const pageSize = 500;
-    for (let from = 0; ; from += pageSize) {
-        const { data, error } = await SB.from('fichajes').select('*').order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, from + pageSize - 1);
-        if (error) throw error;
-        rows.push(...(data || []));
-        if (!data || data.length < pageSize) break;
-    }
-    return { data: rows };
-}
-
-async function pullRemoteData({ fullFichajes = false } = {}) {
+async function pullRemoteData() {
     if (!SB) return;
     const lastPull = localStorage.getItem('last_pull') || '1970-01-01T00:00:00Z';
-    const pullStartedAt = new Date().toISOString();
     try {
-        const { data: rU } = await querySince('ubicaciones', 'updated_at', lastPull);
+        const { data: rU } = await SB.from('ubicaciones').select('*').gt('updated_at', lastPull);
         if (rU?.length) {
             const l = await dbGetAll('ubicaciones');
             for (const ru of rU) {
-                const ex = l.find(u => u.remote_id === ru.id || (ru.client_uuid && u.client_uuid === ru.client_uuid));
-                if (ex && !ex.synced) { ex.remote_id = ru.id; ex.client_uuid = ru.client_uuid || ex.client_uuid; console.warn('Conflicto de sync ubicaciones; se conserva el cambio local', ex.id); await dbPut('ubicaciones', ex); }
-                else if (ex) {
+                const ex = l.find(u => u.remote_id === ru.id || u.id === ru.local_id);
+                if (ex) {
                     Object.assign(ex, {
                         nombre: ru.nombre,
                         tipo: ru.tipo,
@@ -727,7 +678,7 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         creadoPor: ru.creado_por,
                         modificadoPor: ru.modificado_por,
                         modificadoEn: ru.modificado_en,
-                        remote_id: ru.id, client_uuid: ru.client_uuid,
+                        remote_id: ru.id,
                         synced: 1
                     }); await dbPut('ubicaciones', ex);
                 } else {
@@ -737,7 +688,6 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         direccion: ru.direccion,
                         descripcion: ru.descripcion,
                         remote_id: ru.id,
-                        client_uuid: ru.client_uuid,
                         local_id: ru.local_id,
                         creadoPor: ru.creado_por,
                         modificadoPor: ru.modificado_por,
@@ -748,14 +698,13 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                 }
             }
         }
-        const { data: rM } = await querySince('materiales', 'updated_at', lastPull);
+        const { data: rM } = await SB.from('materiales').select('*').gt('updated_at', lastPull);
         if (rM?.length) {
             const lm = await dbGetAll('materiales');
             const lu = await dbGetAll('ubicaciones');
             for (const rm of rM) {
-                const ex = lm.find(m => m.remote_id === rm.id || (rm.client_uuid && m.client_uuid === rm.client_uuid));
-                if (ex && !ex.synced) { ex.remote_id = rm.id; ex.client_uuid = rm.client_uuid || ex.client_uuid; console.warn('Conflicto de sync materiales; se conserva el cambio local', ex.id); await dbPut('materiales', ex); }
-                else if (ex) {
+                const ex = lm.find(m => m.remote_id === rm.id || m.id === rm.local_id);
+                if (ex) {
                     const ub = lu.find(u => u.remote_id === rm.ubicacion_id);
                     Object.assign(ex, {
                         nombre: rm.nombre,
@@ -769,7 +718,7 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         creadoPor: rm.creado_por,
                         modificadoPor: rm.modificado_por,
                         modificadoEn: rm.modificado_en,
-                        remote_id: rm.id, client_uuid: rm.client_uuid, synced: 1
+                        remote_id: rm.id, synced: 1
                     });
                     await dbPut('materiales', ex);
                 } else {
@@ -783,7 +732,6 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         proveedor: rm.proveedor || '',
                         descripcion: rm.descripcion || '',
                         remote_id: rm.id,
-                        client_uuid: rm.client_uuid,
                         local_id: rm.local_id,
                         ubicacionId: ub?.id || null,
                         creadoPor: rm.creado_por,
@@ -795,13 +743,13 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                 }
             }
         }
-        const { data: rMv } = await querySince('movimientos', 'created_at', lastPull);
+        const { data: rMv } = await SB.from('movimientos').select('*').gt('created_at', lastPull);
         if (rMv?.length) {
             const lmv = await dbGetAll('movimientos');
             const lmt = await dbGetAll('materiales');
             const lub = await dbGetAll('ubicaciones');
             for (const rm of rMv) {
-                if (!lmv.find(m => m.remote_id === rm.id || (rm.client_uuid && m.client_uuid === rm.client_uuid))) {
+                if (!lmv.find(m => m.local_id === rm.local_id && rm.local_id)) {
                     const mt = lmt.find(m => m.remote_id === rm.material_id);
                     const ub = lub.find(u => u.remote_id === rm.ubicacion_id);
                     await dbAdd('movimientos', {
@@ -810,7 +758,7 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         nota: rm.nota,
                         fecha: rm.fecha,
                         usuario: rm.usuario,
-                        local_id: rm.local_id, remote_id: rm.id, client_uuid: rm.client_uuid,
+                        local_id: rm.local_id,
                         materialId: mt?.id || null,
                         ubicacionId: ub?.id || null,
                         synced: 1
@@ -818,11 +766,11 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                 }
             }
         }
-        const { data: rUs } = await querySince('usuarios', 'updated_at', lastPull);
+        const { data: rUs } = await SB.from('usuarios').select('*').gt('updated_at', lastPull);
         if (rUs?.length) {
             const lu = await dbGetAll('usuarios');
             for (const ru of rUs) {
-                const ex = lu.find(u => u.remote_id === ru.id || (ru.client_uuid && u.client_uuid === ru.client_uuid));
+                const ex = lu.find(u => u.remote_id === ru.id || u.id === ru.local_id);
                 // Si la nube ya tiene hash, se adopta (caso normal). Si la nube todavía
                 // solo tiene el PIN antiguo en texto plano (cuentas creadas antes de
                 // añadir el hash, cuyo dispositivo original nunca volvió a sincronizar
@@ -830,8 +778,7 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                 // verifyPin() lo migre a hash automáticamente en el próximo login.
                 // Sin esto, un dispositivo nuevo (o tras borrar/resincronizar) se
                 // queda sin nada contra lo que comprobar el PIN y el login falla siempre.
-                if (ex && !ex.synced) { ex.remote_id = ru.id; ex.client_uuid = ru.client_uuid || ex.client_uuid; console.warn('Conflicto de sync usuarios; se conserva el cambio local', ex.id); await dbPut('usuarios', ex); }
-                else if (ex) {
+                if (ex) {
                     ex.nombre = ru.nombre; ex.rol = ru.rol;
                     if (ru.pin_hash) { ex.pinHash = ru.pin_hash; ex.pinSalt = ru.pin_salt; delete ex.pin; }
                     else if (!ex.pinHash && ru.pin) {
@@ -840,14 +787,13 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                     ex.creadoPor = ru.creado_por;
                     ex.modificadoPor = ru.modificado_por;
                     ex.modificadoEn = ru.modificado_en;
-                    ex.remote_id = ru.id; ex.client_uuid = ru.client_uuid || ex.client_uuid; ex.synced = 1;
+                    ex.remote_id = ru.id; ex.synced = 1;
                     await dbPut('usuarios', ex);
                 } else {
                     const nuevo = {
                         nombre: ru.nombre,
                         rol: ru.rol,
                         remote_id: ru.id,
-                        client_uuid: ru.client_uuid,
                         local_id: ru.local_id,
                         creadoPor: ru.creado_por,
                         modificadoPor: ru.modificado_por,
@@ -866,19 +812,18 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                 }
             }
         }
-        const { data: rP } = await querySince('pedidos', 'updated_at', lastPull);
+        const { data: rP } = await SB.from('pedidos').select('*').gt('updated_at', lastPull);
         if (rP?.length) {
             const lp = await dbGetAll('pedidos');
             for (const rped of rP) {
-                const ex = lp.find(p => p.remote_id === rped.id || (rped.client_uuid && p.client_uuid === rped.client_uuid));
-                if (ex && !ex.synced) { ex.remote_id = rped.id; ex.client_uuid = rped.client_uuid || ex.client_uuid; console.warn('Conflicto de sync pedidos; se conserva el cambio local', ex.id); await dbPut('pedidos', ex); }
-                else if (ex) {
+                const ex = lp.find(p => p.remote_id === rped.id || (p.local_id === rped.local_id && rped.local_id));
+                if (ex) {
                     Object.assign(ex, {
                         proveedor: rped.proveedor,
                         estado: rped.estado, notas: rped.notas,
                         lineas: rped.lineas, total: rped.total, creadoPor: rped.creado_por,
                         modificadoPor: rped.modificado_por, modificadoEn: rped.modificado_en,
-                        remote_id: rped.id, client_uuid: rped.client_uuid, synced: 1
+                        remote_id: rped.id, synced: 1
                     });
                     await dbPut('pedidos', ex);
                 } else {
@@ -892,7 +837,7 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         modificadoPor: rped.modificado_por,
                         modificadoEn: rped.modificado_en,
                         fecha: rped.fecha,
-                        local_id: rped.local_id, remote_id: rped.id, client_uuid: rped.client_uuid,
+                        local_id: rped.local_id, remote_id: rped.id,
                         synced: 1
                     });
                 }
@@ -901,20 +846,14 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
         // Descargar fichajes remotos: nuevos + ediciones/borrados hechos desde
         // otro dispositivo (imprescindible para que la presencia se vea igual
         // en todos los dispositivos, incluyendo correcciones del administrador).
-        const { data: rFichs } = fullFichajes
-            ? await queryAllFichajes()
-            : await querySince('fichajes', 'updated_at', lastPull);
+        const { data: rFichs } = await SB.from('fichajes').select('*').gt('updated_at', lastPull);
         if (rFichs?.length) {
             const lf = await dbGetAll('fichajes');
-            const usersForFichajes = await dbGetAll('usuarios');
             for (const r of rFichs) {
-                const ex = lf.find(f => f.remote_id === r.id || (r.client_uuid && f.client_uuid === r.client_uuid));
-                if (ex && !ex.sinc) { ex.remote_id = r.id; ex.client_uuid = r.client_uuid || ex.client_uuid; console.warn('Conflicto de sync fichajes; se conserva el cambio local', ex.id); await dbPut('fichajes', ex); }
-                else if (ex) {
+                const ex = lf.find(f => f.remote_id === r.id || (f.local_id === r.local_id && r.local_id));
+                if (ex) {
                     Object.assign(ex, {
-                        userId: usersForFichajes.find(u => u.remote_id === r.user_remote_id)?.id || null,
-                        userRemoteId: r.user_remote_id || null,
-                        legacyUserId: r.user_remote_id ? null : r.user_id,
+                        userId: r.user_id,
                         nombreUsuario: r.nombre_usuario,
                         rolUsuario: r.rol_usuario,
                         tipo: r.tipo, fecha: r.fecha,
@@ -922,14 +861,12 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         creadoPor: r.creado_por,
                         modificadoPor: r.modificado_por,
                         nota: r.nota || '',
-                        remote_id: r.id, client_uuid: r.client_uuid, sinc: 1
+                        remote_id: r.id, sinc: 1
                     });
                     await dbPut('fichajes', ex);
                 } else {
                     await dbAdd('fichajes', {
-                        userId: usersForFichajes.find(u => u.remote_id === r.user_remote_id)?.id || null,
-                        userRemoteId: r.user_remote_id || null,
-                        legacyUserId: r.user_remote_id ? null : r.user_id,
+                        userId: r.user_id,
                         nombreUsuario: r.nombre_usuario,
                         rolUsuario: r.rol_usuario,
                         tipo: r.tipo, fecha: r.fecha,
@@ -938,7 +875,7 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
                         modificadoPor: r.modificado_por,
                         dispositivo: r.dispositivo,
                         nota: r.nota || '', local_id: r.local_id,
-                        remote_id: r.id, client_uuid: r.client_uuid,
+                        remote_id: r.id,
                         sinc: 1
                     });
                 }
@@ -947,11 +884,11 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
         // Aplicar localmente los borrados hechos desde otro dispositivo (materiales,
         // ubicaciones, usuarios, fichajes...). Postgres no notifica DELETEs por sí solo,
         // así que se consulta el registro de "tumbas" y se replica el borrado aquí.
-        const { data: rBorrados } = await querySince('registros_borrados', 'borrado_en', lastPull);
+        const { data: rBorrados } = await SB.from('registros_borrados').select('*').gt('borrado_en', lastPull).then(r => r).catch(() => ({ data: null }));
         if (rBorrados?.length) {
             const storesAfectados = [...new Set(rBorrados.map(d => d.tabla))];
             for (const store of storesAfectados) {
-                if (!['materiales', 'ubicaciones', 'usuarios', 'fichajes', 'pedidos'].includes(store)) continue;
+                if (!['materiales', 'ubicaciones', 'usuarios', 'fichajes'].includes(store)) continue;
                 const locales = await dbGetAll(store);
                 const idsBorrados = rBorrados.filter(d => d.tabla === store).map(d => d.remote_id);
                 for (const remoteId of idsBorrados) {
@@ -973,19 +910,17 @@ async function pullRemoteData({ fullFichajes = false } = {}) {
             }
         }
         // Descargar configuración global (ej. permitir fichaje manual)
-        const { data: rCfg } = await querySince('config', 'updated_at', lastPull);
+        const { data: rCfg } = await SB.from('config').select('*').gt('updated_at', lastPull);
         if (rCfg?.length) {
             for (const r of rCfg) {
                 await dbPut('config', { key: r.key, value: r.value, modificadoPor: r.modificado_por, modificadoEn: r.modificado_en, synced: 1 });
             }
         }
-        localStorage.setItem('last_pull', new Date(new Date(pullStartedAt).getTime() - 2000).toISOString());
+        localStorage.setItem('last_pull', new Date().toISOString());
         renderAll();
         if (typeof applyFichajeConfigUI === 'function') applyFichajeConfigUI();
-        return true;
     } catch (e) {
         console.error('pull', e);
-        return false;
     }
 }
 
@@ -2330,34 +2265,12 @@ async function addUser() {
 
 // ── Borra un registro localmente y, si ya estaba sincronizado, también en
 //    la nube, dejando una "tumba" para que otros dispositivos lo repliquen. ──
-function enqueueRemoteDelete(store, remoteId) {
-    if (!remoteId) return;
-    const queue = JSON.parse(localStorage.getItem('pending_remote_deletes') || '[]');
-    if (!queue.some(item => item.store === store && item.remote_id === remoteId)) {
-        queue.push({ store, remote_id: remoteId, created_at: new Date().toISOString() });
-        localStorage.setItem('pending_remote_deletes', JSON.stringify(queue));
-    }
-}
-
-async function flushRemoteDeletes() {
-    const queue = JSON.parse(localStorage.getItem('pending_remote_deletes') || '[]');
-    const pending = [];
-    for (const item of queue) {
-        const { error } = await SB.from(item.store).delete().eq('id', item.remote_id);
-        if (error) { pending.push(item); continue; }
-        const { error: tombstoneError } = await SB.from('registros_borrados').insert({ tabla: item.store, remote_id: item.remote_id, borrado_por: currentUser?.nombre || '' });
-        if (tombstoneError) pending.push(item);
-    }
-    localStorage.setItem('pending_remote_deletes', JSON.stringify(pending));
-}
-
 async function deleteRecordWithSync(store, localId, remoteId) {
-    if (remoteId) {
-        enqueueRemoteDelete(store, remoteId);
-        if (SB && navigator.onLine) {
-            try { await flushRemoteDeletes(); }
-            catch (e) { console.error('Borrado remoto pendiente de reintento:', e); }
-        }
+    if (remoteId && SB) {
+        try {
+            await SB.from(store).delete().eq('id', remoteId);
+            await SB.from('registros_borrados').insert({ tabla: store, remote_id: remoteId, borrado_por: currentUser?.nombre || '' });
+        } catch (e) { console.error(`Error al borrar ${store} remotamente:`, e); }
     }
     await dbDelete(store, localId);
 }
@@ -2645,7 +2558,7 @@ async function resyncTables(tableNames) {
         toast('Conecta Supabase primero en ☁️ Sync', 'error');
         return false;
     }
-    const ok = await pullRemoteDataFull({ fullFichajes: tableNames.includes('fichajes') });
+    const ok = await pullRemoteDataFull();
     if (!ok)
         toast('No se pudo resincronizar — revisa la conexión', 'error');
     return ok;
@@ -2690,11 +2603,11 @@ async function applyLocalReset() {
      </p>${warnUsuarios}`,
         async () => {
             if (wipe) for (const t of tables) await dbClear(t);
-            const resyncOk = !resync || await resyncTables(tables);
+            if (resync)
+                await resyncTables(tables); // ya muestra su propio aviso si falla
             await refreshCurrentUserAfterReset(tables);
             refreshVisibleScreens();
-            if (resyncOk) toast('✓ Operación completada', 'success');
-            else toast('La limpieza se aplicó, pero no se pudo recuperar todo desde la nube. Vuelve a resincronizar.', 'error');
+            toast('✓ Operación completada', 'success');
         }, 'Aplicar');
 }
 
@@ -3114,14 +3027,9 @@ async function handleQrResult(raw) {
 // Detecta el estado actual del operario (dentro/fuera) y registra
 // automáticamente el tipo de movimiento contrario (entrada si estaba
 // fuera, salida si estaba dentro), sin mostrar registros de otros usuarios.
-async function handleQrFichaje(userRemoteId) {
+async function handleQrFichaje(userId) {
     const usuarios = await dbGetAll('usuarios');
-    const usuario = usuarios.find(u => u.remote_id === userRemoteId);
-    if (!usuario && /^\d+$/.test(String(userRemoteId))) {
-        toast('Credencial QR antigua: reimprime la etiqueta para usar el ID canónico', 'error');
-        return;
-    }
-    const userId = usuario?.id;
+    const usuario = usuarios.find(u => u.local_id === userId);
     if (!usuario) {
         toast('Usuario no encontrado en este dispositivo', 'error');
         return;
@@ -3296,10 +3204,10 @@ async function renderLabelsList() {
         else if (labelsTab === 'ubicaciones') sub = (item.tipo || '') + ' · ' + (item.direccion || '—');
         else sub = (ROLES[item.rol]?.label || item.rol);
         return `<div class="label-card">
-      <input type="checkbox" id="lbl-${i}" value="${item.id}" checked>
+      <input type="checkbox" id="lbl-${i}" value="${item.local_id}" checked>
       <div class="label-card-info">
         <h4>${item.nombre}</h4>
-        <p>${item.id} - ${sub}</p>
+        <p>${item.local_id} - ${sub}</p>
       </div>
     </div>`;
     }).join('');
@@ -3322,8 +3230,8 @@ async function printLabels() {
         );
     }
 
-    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => Number(cb.value));
-    const items = labelsData.filter(item => checked.includes(item.id));
+    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => parseInt(cb.value));
+    const items = labelsData.filter(item => checked.includes(item.local_id));
     if (!items.length) {
         toast('Selecciona al menos una etiqueta', 'error');
         return;
@@ -3452,7 +3360,6 @@ async function printLabels2() {
     const ubicMap = {}; ubics.forEach(u => ubicMap[u.id] = u);
 
     const qrType = labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario';
-    if (qrType === 'usuario' && items.some(item => !item.remote_id)) { toast('Sincroniza los usuarios antes de imprimir credenciales QR', 'error'); return; }
 
     const wrapper = document.createElement('div');
     wrapper.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;padding:8px;`;
@@ -3481,7 +3388,7 @@ async function printLabels2() {
       <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
       ${subtitle ? `<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>` : ''}
       <canvas id="qrc-${item.id}" style="display:block;margin:0 auto;"></canvas>
-      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${qrType === 'usuario' ? item.remote_id : item.id}</div>`;
+      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.id}</div>`;
 
         wrapper.appendChild(div);
     }
@@ -3489,8 +3396,7 @@ async function printLabels2() {
 
     // Generar QRs
     for (const item of items) {
-        const qrId = qrType === 'usuario' ? item.remote_id : item.id;
-        const payload = JSON.stringify({ type: qrType, id: qrId, nombre: item.nombre });
+        const payload = JSON.stringify({ type: qrType, id: item.id, nombre: item.nombre });
         const canvas = printArea.querySelector(`#qrc-${item.id}`);
         if (canvas) {
             try {
@@ -3766,7 +3672,6 @@ async function guardarFichaje({ userId, usuario, tipo, nota, creadoPor }) {
     const now = new Date().toISOString();
     const fichaje = {
         userId,
-        userRemoteId: usuario.remote_id || null,
         nombreUsuario: usuario.nombre,
         rolUsuario: usuario.rol,
         tipo,
@@ -3829,7 +3734,7 @@ async function recargarPresencia() {
 
     // Si Supabase disponible, forzar descarga primero
     if (typeof pullRemoteData === 'function' && navigator.onLine) {
-        await pullRemoteData({ fullFichajes: true });
+        await pullRemoteData();
     }
 
     await applyFichajeConfigUI();
@@ -3931,7 +3836,7 @@ async function renderAdminAhora() {
         adminSel.innerHTML = '<option value="">— Seleccionar —</option>';
         usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado').sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(u => {
             const o = document.createElement('option');
-            o.value = u.id; o.textContent = u.nombre;
+            o.value = u.local_id; o.textContent = u.local_id + ' - ' + u.nombre;
             adminSel.appendChild(o);
         });
     }
@@ -4041,7 +3946,7 @@ async function editFichaje(id) {
     if (!f) return;
     const usuarios = await dbGetAll('usuarios');
     const fichables = usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado');
-    const userOpts = fichables.map(u => `<option value="${u.id}" ${f.userId === u.id ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('');
+    const userOpts = fichables.map(u => `<option value="${u.local_id}" ${f.userId === u.local_id ? 'selected' : ''}>${esc(u.local_id)} - ${esc(u.nombre)}</option>`).join('');
 
     const dt = new Date(f.fecha);
     const pad = n => String(n).padStart(2, '0');
@@ -4070,7 +3975,6 @@ async function editFichaje(id) {
 
         const usuario = usuarios.find(u => u.id === userId);
         f.userId = userId;
-        f.userRemoteId = usuario?.remote_id || null;
         f.nombreUsuario = usuario?.nombre || f.nombreUsuario;
         f.rolUsuario = usuario?.rol || f.rolUsuario;
         f.tipo = tipo;
@@ -4199,7 +4103,7 @@ async function populateAdminSelectors() {
         if (first) sel.appendChild(first.cloneNode(true));
         fichables.forEach(u => {
             const o = document.createElement('option');
-            o.value = u.id; o.textContent = u.nombre;
+            o.value = u.local_id; o.textContent = u.local_id + ' - ' + u.nombre;
             sel.appendChild(o);
         });
         if (prev) sel.value = prev;
@@ -4215,11 +4119,7 @@ async function setPresentesTab(tab) {
         if (btn) btn.classList.toggle('active', t === tab);
         if (cnt) cnt.style.display = t === tab ? 'block' : 'none';
     });
-    if (tab === 'historial') {
-        PRES.histPage = 0;
-        if (navigator.onLine && SB) await pullRemoteData({ fullFichajes: true });
-        await renderAdminHistorial();
-    }
+    if (tab === 'historial') { PRES.histPage = 0; await renderAdminHistorial(); }
     if (tab === 'jornadas') await renderAdminJornadas();
 }
 
@@ -4247,13 +4147,10 @@ function iniciarRTFichajes() {
                 const r = payload.new;
                 if (!r) return;
                 const locales = await dbGetAll('fichajes');
-                const usuariosLocales = await dbGetAll('usuarios');
-                const existe = locales.find(f => f.remote_id === r.id || (r.client_uuid && f.client_uuid === r.client_uuid));
+                const existe = locales.find(f => f.local_id === r.local_id && r.local_id);
                 if (!existe) {
                     await dbAdd('fichajes', {
-                        userId: usuariosLocales.find(u => u.remote_id === r.user_remote_id)?.id || null,
-                        userRemoteId: r.user_remote_id || null,
-                        legacyUserId: r.user_remote_id ? null : r.user_id,
+                        userId: r.user_id,
                         nombreUsuario: r.nombre_usuario,
                         rolUsuario: r.rol_usuario,
                         tipo: r.tipo,
@@ -4262,7 +4159,7 @@ function iniciarRTFichajes() {
                         creadoPor: r.creado_por,
                         dispositivo: r.dispositivo,
                         nota: r.nota || '',
-                        local_id: r.local_id, remote_id: r.id, client_uuid: r.client_uuid,
+                        local_id: r.local_id,
                         sinc: 1
                     });
                 }
