@@ -2369,9 +2369,16 @@ body {
     display: block !important;
   }
 
-  /* Oculta el canvas y conserva solo la imagen imprimible */
-  #print-label-area .print-label div img {
+  /* qrcode.min.js genera canvas + img del mismo QR; imprimir solo la img. */
+  #print-label-area .print-label .qr-code canvas {
     display: none !important;
+  }
+  #print-label-area .print-label .qr-code img {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: 100%;
+    margin: 0 auto;
   }
   
   #print-label-area {

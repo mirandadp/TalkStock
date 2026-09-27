@@ -3088,7 +3088,7 @@ async function handleQrResult(raw) {
     const [mats, ubics] = await Promise.all([dbGetAll('materiales'), dbGetAll('ubicaciones')]);
 
     if (payload.type === 'material') {
-        const mat = mats.find(m => m.id === payload.id);
+        const mat = mats.find(m => m.remote_id === String(payload.id)) || mats.find(m => m.id === Number(payload.id));
         if (mat) {
             if (qrMode === 'info') showQrInfo('material', mat, ubics);
             else showQrMovimiento(mat, ubics);
@@ -3096,7 +3096,7 @@ async function handleQrResult(raw) {
             toast('Material no encontrado en la base de datos local', 'error');
         }
     } else if (payload.type === 'ubicacion') {
-        const ubic = ubics.find(u => u.id === payload.id);
+        const ubic = ubics.find(u => u.remote_id === String(payload.id)) || ubics.find(u => u.id === Number(payload.id));
         if (ubic) {
             if (qrMode === 'info') showQrUbicInfo(ubic, mats);
             else showQrUbicMovimiento(ubic, mats);
@@ -3310,158 +3310,36 @@ function selectAllLabels(val) {
 }
 
 async function printLabels() {
-    // Cargar QRCode.js si no está
-    if (!window.QRCode) {
-        await new Promise((res, rej) => {
-            const s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
-            s.onload = res;
-            s.onerror = rej;
-            document.head.appendChild(s);
-        }
-        );
-    }
-
-    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => Number(cb.value));
-    const items = labelsData.filter(item => checked.includes(item.id));
-    if (!items.length) {
-        toast('Selecciona al menos una etiqueta', 'error');
-        return;
-    }
-
-    const cols = parseInt(document.getElementById('label-cols').value) || 2;
-    const sizeMm = parseInt(document.getElementById('label-size').value) || 60;
-    const sizePx = sizeMm * 3.78;
-    // mm a px aprox 96dpi
-
-    const printArea = document.getElementById('print-label-area');
-    printArea.innerHTML = '';
-
-    const ubics = await dbGetAll('ubicaciones');
-    const ubicMap = {};
-    ubics.forEach(u => ubicMap[u.id] = u);
-
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;padding:8px;`;
-
-    for (const item of items) {
-        const payload = JSON.stringify({
-            type: labelsTab === 'materiales' ? 'material' : 'ubicacion',
-            id: item.local_id,
-            nombre: item.nombre
-        });
-
-        const div = document.createElement('div');
-        div.className = 'print-label';
-        div.style.cssText = `width:${sizeMm}mm;padding:3mm;border:1px solid #ccc;border-radius:2mm;font-family:Arial,sans-serif;box-sizing:border-box;page-break-inside:avoid;background:#fff;`;
-
-        const icon = labelsTab === 'ubicaciones' ? (item.tipo === 'furgoneta' ? '🚐' : item.tipo === 'almacen' ? '🏭' : '📍') : '📦';
-        let subtitle = '';
-        if (labelsTab === 'materiales') {
-            const ub = ubicMap[item.ubicacionId];
-            subtitle = [(ub ? ub.nombre : ''), item.referencia || '', item.unidad || ''].filter(Boolean).join(' · ');
-        } else {
-            subtitle = [item.tipo || '', item.direccion || ''].filter(Boolean).join(' · ');
-        }
-
-        div.innerHTML = `
-      <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
-      ${subtitle ? `<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>` : ''}
-      <div id="qrc-${item.local_id}" style="display:block;margin:0 auto;"></div>
-      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${item.local_id}</div>`;
-
-        wrapper.appendChild(div);
-    }
-    printArea.appendChild(wrapper);
-
-    // Generar QRs
-    for (const item of items) {
-        const payload = JSON.stringify({
-            type: labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario',
-            id: item.local_id,
-            nombre: item.nombre
-        });
-        const canvas = printArea.querySelector(`#qrc-${item.local_id}`);
-        if (canvas) {
-            // try {
-            //     var qrc = new QRCode(canvas, {
-            //         width: Math.min(sizePx * 0.55, 120),
-            //         height: Math.min(sizePx * 0.55, 120),
-            //         //correctLevel:QRCode.CorrectLevel.M,
-            //         version:10
-            //     })
-            //     qrc.makeCode(payload);                 
-            //     // await QRCode.toCanvas(canvas, payload, {
-            //     //   width: Math.min(sizePx*0.55, 120),
-            //     //   margin:1,
-            //     //   color:{ dark:'#1a1a2e', light:'#ffffff' }
-            //     // });
-            // } catch (e) {
-            //     console.error('QR error', e);
-            // }
-
-            try {
-                // Intentar con texto original
-                const qr = new QRCode(canvas, {
-                    text: payload,
-                    width: Math.min(sizePx * 0.55, 120),
-                    height: Math.min(sizePx * 0.55, 120),
-                    correctLevel: QRCode.CorrectLevel.L
-                });
-            } catch (e) {
-                // Si falla, codificar en URI
-                const textoCodificado = encodeURIComponent(payload);
-                const qr = new QRCode(canvas, {
-                    text: textoCodificado,
-                    width: Math.min(sizePx * 0.55, 120),
-                    height: Math.min(sizePx * 0.55, 120),
-                    correctLevel: QRCode.CorrectLevel.L
-                });
-                console.warn('Texto codificado debido a caracteres especiales');
-            }
-        }
-    }
-
-    closeModal('qr-labels-modal');
-    setTimeout(() => window.print(), 300);
+    // Alias conservado para llamadas antiguas; ambas entradas imprimen UID canónico.
+    return printLabels2();
 }
 
 async function printLabels2() {
-    // Cargar QRCode.js si no está
-    if (!window.QRCode) {
-        await new Promise((res, rej) => {
-            const s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
-            s.onload = res; s.onerror = rej;
-            document.head.appendChild(s);
-        });
+    if (typeof QRCode !== 'function') {
+        toast('No se pudo cargar la librería QR local', 'error');
+        return;
     }
 
-    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')].map(cb => parseInt(cb.value));
+    const checked = [...document.querySelectorAll('#labels-list input[type=checkbox]:checked')]
+        .map(cb => Number(cb.value));
     const items = labelsData.filter(item => checked.includes(item.id));
     if (!items.length) { toast('Selecciona al menos una etiqueta', 'error'); return; }
+    if (items.some(item => !item.remote_id)) {
+        toast('Sincroniza los elementos seleccionados antes de imprimir sus UID', 'error');
+        return;
+    }
 
-    const cols = parseInt(document.getElementById('label-cols').value) || 2;
     const sizeMm = parseInt(document.getElementById('label-size').value) || 60;
-    const sizePx = sizeMm * 3.78; // mm a px aprox 96dpi
-
+    const sizePx = Math.min(Math.round(sizeMm * 3.78 * 0.55), 180);
     const printArea = document.getElementById('print-label-area');
     printArea.innerHTML = '';
-
     const ubics = await dbGetAll('ubicaciones');
-    const ubicMap = {}; ubics.forEach(u => ubicMap[u.id] = u);
-
+    const ubicMap = Object.fromEntries(ubics.map(u => [u.id, u]));
     const qrType = labelsTab === 'materiales' ? 'material' : labelsTab === 'ubicaciones' ? 'ubicacion' : 'usuario';
-    if (qrType === 'usuario' && items.some(item => !item.remote_id)) { toast('Sincroniza los usuarios antes de imprimir credenciales QR', 'error'); return; }
-
     const wrapper = document.createElement('div');
-    wrapper.style.cssText = `display:flex;flex-wrap:wrap;gap:6px;padding:8px;`;
+    wrapper.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:8px;';
 
-    for (const item of items) {
-        const div = document.createElement('div');
-        div.className = 'print-label';
-        div.style.cssText = `width:${sizeMm}mm;padding:3mm;border:1px solid #ccc;border-radius:2mm;font-family:Arial,sans-serif;box-sizing:border-box;page-break-inside:avoid;background:#fff;`;
-
+    for (const [index, item] of items.entries()) {
         let icon, subtitle;
         if (labelsTab === 'materiales') {
             icon = '📦';
@@ -3471,36 +3349,54 @@ async function printLabels2() {
             icon = item.tipo === 'furgoneta' ? '🚐' : item.tipo === 'almacen' ? '🏭' : '📍';
             subtitle = [item.tipo || '', item.direccion || ''].filter(Boolean).join(' · ');
         } else {
-            // Credencial de usuario para fichaje
-            const r = ROLES[item.rol] || {};
-            icon = r.emoji || '👤';
-            subtitle = 'Credencial de fichaje · ' + (r.label || item.rol);
+            const role = ROLES[item.rol] || {};
+            icon = role.emoji || '👤';
+            subtitle = 'Credencial de fichaje · ' + (role.label || item.rol);
         }
 
-        div.innerHTML = `
-      <div style="font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;">${icon} ${item.nombre}</div>
-      ${subtitle ? `<div style="font-size:6.5pt;color:#666;margin-bottom:2mm;">${subtitle}</div>` : ''}
-      <canvas id="qrc-${item.id}" style="display:block;margin:0 auto;"></canvas>
-      <div style="font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;">StockVoz · ID:${qrType === 'usuario' ? item.remote_id : item.id}</div>`;
-
-        wrapper.appendChild(div);
+        const card = document.createElement('div');
+        card.className = 'print-label';
+        card.style.cssText = 'width:' + sizeMm + 'mm;padding:3mm;border:1px solid #ccc;border-radius:2mm;font-family:Arial,sans-serif;box-sizing:border-box;page-break-inside:avoid;background:#fff;';
+        const title = document.createElement('div');
+        title.style.cssText = 'font-size:9pt;font-weight:bold;margin-bottom:1mm;line-height:1.3;';
+        title.textContent = icon + ' ' + item.nombre;
+        card.appendChild(title);
+        if (subtitle) {
+            const sub = document.createElement('div');
+            sub.style.cssText = 'font-size:6.5pt;color:#666;margin-bottom:2mm;';
+            sub.textContent = subtitle;
+            card.appendChild(sub);
+        }
+        const qrBox = document.createElement('div');
+        qrBox.className = 'qr-code';
+        qrBox.id = 'qrc-' + index;
+        qrBox.style.cssText = 'width:' + sizePx + 'px;height:' + sizePx + 'px;margin:0 auto;display:flex;align-items:center;justify-content:center;';
+        card.appendChild(qrBox);
+        const idText = document.createElement('div');
+        idText.style.cssText = 'font-size:5.5pt;color:#999;text-align:center;margin-top:1mm;overflow-wrap:anywhere;';
+        idText.textContent = 'StockVoz · UID:' + item.remote_id;
+        card.appendChild(idText);
+        wrapper.appendChild(card);
     }
     printArea.appendChild(wrapper);
 
-    // Generar QRs
-    for (const item of items) {
-        const qrId = qrType === 'usuario' ? item.remote_id : item.id;
-        const payload = JSON.stringify({ type: qrType, id: qrId, nombre: item.nombre });
-        const canvas = printArea.querySelector(`#qrc-${item.id}`);
-        if (canvas) {
-            try {
-                await QRCode.toCanvas(canvas, payload, {
-                    width: Math.min(sizePx * 0.55, 120),
-                    margin: 1,
-                    color: { dark: '#1a1a2e', light: '#ffffff' }
-                });
-            } catch (e) { console.error('QR error', e); }
+    try {
+        for (const [index, item] of items.entries()) {
+            const payload = JSON.stringify({ type: qrType, id: item.remote_id, nombre: item.nombre });
+            const qrBox = printArea.querySelector('#qrc-' + index);
+            qrBox.innerHTML = '';
+            new QRCode(qrBox, {
+                text: payload,
+                width: sizePx,
+                height: sizePx,
+                correctLevel: QRCode.CorrectLevel.L
+            });
         }
+    } catch (e) {
+        console.error('No se pudieron generar los QR', e);
+        printArea.innerHTML = '';
+        toast('Error al generar los QR. Revisa la librería local qrcode.min.js', 'error');
+        return;
     }
 
     closeModal('qr-labels-modal');

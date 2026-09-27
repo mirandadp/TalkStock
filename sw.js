@@ -1,4 +1,4 @@
-const CACHE = 'stockvoz-v6';
+const CACHE = 'stockvoz-v9';
 const ASSETS = [
   '/',
   '/app.html',
