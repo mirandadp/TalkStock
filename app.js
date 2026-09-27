@@ -3382,7 +3382,7 @@ async function printLabels2() {
 
     try {
         for (const [index, item] of items.entries()) {
-            const payload = JSON.stringify({ type: qrType, id: item.remote_id, nombre: item.nombre });
+            const payload = encodeURIComponent(JSON.stringify({ type: qrType, id: item.remote_id, nombre: item.nombre }));
             const qrBox = printArea.querySelector('#qrc-' + index);
             qrBox.innerHTML = '';
             new QRCode(qrBox, {
