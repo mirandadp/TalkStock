@@ -168,6 +168,24 @@ function loginShowSection(name) {
  * hay usuarios locales, se pregunta al usuario si es la primera
  * instalación o si debe conectarse a una nube existente.
  */
+// Fuerza una descarga completa desde Supabase ignorando el cursor de
+// sincronización incremental (`last_pull`). Necesario en el login: si la
+// tabla local de usuarios está vacía (recién instalado, o borrada a mano)
+// pero el cursor apunta a una fecha reciente de una sesión anterior,
+// pullRemoteData() normal solo trae lo que cambió DESPUÉS de esa fecha y
+// nunca redescarga usuarios que ya existían en la nube desde antes.
+async function pullRemoteDataFull() {
+    const prevLastPull = localStorage.getItem('last_pull');
+    localStorage.setItem('last_pull', '1970-01-01T00:00:00Z');
+    try {
+        await pullRemoteData(); // ya deja last_pull actualizado a "ahora" al terminar
+        return true;
+    } catch (e) {
+        if (prevLastPull) localStorage.setItem('last_pull', prevLastPull);
+        return false;
+    }
+}
+
 async function initLogin() {
     loginShowSection('login-checking');
 
@@ -187,10 +205,11 @@ async function initLogin() {
     // No hay usuarios locales. ¿Hay credenciales de nube guardadas en este dispositivo?
     const { url, key } = getSBConfig();
     if (url && key) {
-        // Ya se configuró la nube antes en este dispositivo — comprobar ahí primero
+        // Ya se configuró la nube antes en este dispositivo — comprobar ahí primero.
+        // Al no haber usuarios locales, se fuerza descarga completa (ver nota arriba).
         if (initSupabase()) {
             if (navigator.onLine) {
-                try { await pullRemoteData(); } catch (e) { }
+                await pullRemoteDataFull();
             }
             usuarios = await dbGetAll('usuarios');
             if (usuarios.length) { showLoginUserSelect(usuarios); return; }
@@ -209,9 +228,9 @@ async function initLogin() {
 function showLoginUserSelect(usuarios) {
     const sel = document.getElementById('login-user-sel');
     sel.innerHTML = '<option value="">— Seleccionar —</option>';
-    usuarios.forEach(u => {
+    usuarios.sort((a, b) => -a.rol.localeCompare(b.rol)).forEach(u => {
         const opt = document.createElement('option');
-        opt.value = u.id; opt.textContent = u.nombre + ' (' + (ROLES[u.rol]?.emoji || '') + ')';
+        opt.value = u.id; opt.textContent = (ROLES[u.rol]?.emoji || '') + ' (' + u.local_id + ') ' + u.nombre;
         sel.appendChild(opt);
     });
     loginShowSection('user-select-wrap');
@@ -244,7 +263,13 @@ async function connectCloudAndCheck() {
 
     try {
         if (!initSupabase()) { throw new Error('No se pudo inicializar la conexión'); }
-        await pullRemoteData();
+        // Se fuerza una descarga COMPLETA (no incremental): al conectar desde
+        // esta pantalla la tabla local de usuarios está vacía, así que interesa
+        // traer todo lo que haya en la nube sin importar cuándo se creó, en vez
+        // de solo lo "nuevo" según el cursor de sincronización.
+        const ok = await pullRemoteDataFull();
+        if (!ok) throw new Error('No se pudo descargar de la nube');
+
         const usuarios = await dbGetAll('usuarios');
         if (usuarios.length) {
             toast('✓ Conectado — usuarios encontrados', 'success');
@@ -252,7 +277,7 @@ async function connectCloudAndCheck() {
         } else {
             // Borrar los usuarios locales y volver a descargarlos
             dbClear('usuarios');
-            localStorage.setItem('last_pull', null) ;
+            localStorage.setItem('last_pull', null);
             localStorage.removeItem('last_pull');
             toast('☁️ Conectado, pero sin usuarios en la nube, vuelva a intentarlo', '');
             loginShowSection('first-setup');
@@ -658,10 +683,15 @@ async function pullRemoteData() {
                     }); await dbPut('ubicaciones', ex);
                 } else {
                     await dbAdd('ubicaciones', {
-                        nombre: ru.nombre, tipo: ru.tipo,
-                        direccion: ru.direccion, descripcion: ru.descripcion,
-                        remote_id: ru.id, local_id: ru.local_id, creadoPor: ru.creado_por,
-                        modificadoPor: ru.modificado_por, modificadoEn: ru.modificado_en,
+                        nombre: ru.nombre,
+                        tipo: ru.tipo,
+                        direccion: ru.direccion,
+                        descripcion: ru.descripcion,
+                        remote_id: ru.id,
+                        local_id: ru.local_id,
+                        creadoPor: ru.creado_por,
+                        modificadoPor: ru.modificado_por,
+                        modificadoEn: ru.modificado_en,
                         synced: 1,
                         creado: ru.creado
                     });
@@ -677,11 +707,18 @@ async function pullRemoteData() {
                 if (ex) {
                     const ub = lu.find(u => u.remote_id === rm.ubicacion_id);
                     Object.assign(ex, {
-                        nombre: rm.nombre, cantidad: rm.cantidad, unidad: rm.unidad,
-                        precio: rm.precio || 0, minimo: rm.minimo, proveedor: rm.proveedor || '',
-                        descripcion: rm.descripcion || '', ubicacionId: ub?.id || ex.ubicacionId,
-                        creadoPor: rm.creado_por, modificadoPor: rm.modificado_por,
-                        modificadoEn: rm.modificado_en, remote_id: rm.id, synced: 1
+                        nombre: rm.nombre,
+                        cantidad: rm.cantidad,
+                        unidad: rm.unidad,
+                        precio: rm.precio || 0,
+                        minimo: rm.minimo,
+                        proveedor: rm.proveedor || '',
+                        descripcion: rm.descripcion || '',
+                        ubicacionId: ub?.id || ex.ubicacionId,
+                        creadoPor: rm.creado_por,
+                        modificadoPor: rm.modificado_por,
+                        modificadoEn: rm.modificado_en,
+                        remote_id: rm.id, synced: 1
                     });
                     await dbPut('materiales', ex);
                 } else {
@@ -2111,7 +2148,7 @@ async function renderAdmin() {
     if (ac) ac.style.display = 'block';
 
     const [users] = await Promise.all([dbGetAll('usuarios')]);
-        
+
     // User list — con auditoría y botón editar
     const userList = document.getElementById('userList');
     if (userList) userList.innerHTML = users.map(u => {
@@ -2195,7 +2232,7 @@ async function renderMtos() {
       </div>
     </div>`;
     }).join('') : '<p style="color:var(--text3);font-size:13px;">Sin ubicaciones</p>';
-   
+
 }
 
 async function updateStats() {
@@ -2517,17 +2554,14 @@ function selectAllDataTables(val, prefix) {
 // tablas no seleccionadas esto simplemente actualiza/fusiona sin duplicar,
 // y para las que sí se vaciaron antes, garantiza una copia limpia de la nube.)
 async function resyncTables(tableNames) {
-    if (!SB && !initSupabase()) { toast('Conecta Supabase primero en ☁️ Sync', 'error'); return false; }
-    const prevLastPull = localStorage.getItem('last_pull');
-    localStorage.setItem('last_pull', '1970-01-01T00:00:00Z'); // fuerza traer todo el histórico
-    try {
-        await pullRemoteData(); // ya deja last_pull actualizado a "ahora" al terminar
-        return true;
-    } catch (e) {
-        if (prevLastPull) localStorage.setItem('last_pull', prevLastPull);
-        console.error('resyncTables error:', e);
+    if (!SB && !initSupabase()) {
+        toast('Conecta Supabase primero en ☁️ Sync', 'error');
         return false;
     }
+    const ok = await pullRemoteDataFull();
+    if (!ok)
+        toast('No se pudo resincronizar — revisa la conexión', 'error');
+    return ok;
 }
 
 // Si se ha tocado la tabla 'usuarios', refresca el objeto currentUser en
@@ -2569,10 +2603,8 @@ async function applyLocalReset() {
      </p>${warnUsuarios}`,
         async () => {
             if (wipe) for (const t of tables) await dbClear(t);
-            if (resync) {
-                const ok = await resyncTables(tables);
-                if (!ok) { toast('No se pudo resincronizar — revisa la conexión', 'error'); }
-            }
+            if (resync)
+                await resyncTables(tables); // ya muestra su propio aviso si falla
             await refreshCurrentUserAfterReset(tables);
             refreshVisibleScreens();
             toast('✓ Operación completada', 'success');
@@ -2704,14 +2736,14 @@ function showScreen(name) {
     if (name === 'ped' && !hasPermiso('verPedidos')) { toast('Sin permiso', 'error'); return; }
     if (name === 'admin' && !hasPermiso('gestionAdmin')) { toast('Solo administradores', 'error'); return; }
     if (name === 'mtos' && !hasPermiso('gestionMtos')) { toast('Solo encargados y administradores', 'error'); return; }
-document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('screen-' + name).classList.add('active');
     const nb = document.getElementById('nav-' + name); if (nb) nb.classList.add('active');
     if (name === 'inv') renderInventory();
     else if (name === 'mov') renderMovements();
     else if (name === 'ped') renderPedidos();
-    else if (name === 'mtos') renderMtos(); 
+    else if (name === 'mtos') renderMtos();
     else if (name === 'admin') { renderAdmin(); updateStats(); }
     else if (name === 'qr') {/* QR screen rendered statically */ }
     else if (name === 'fichaje') renderFichaje();
@@ -3796,7 +3828,7 @@ async function renderAdminAhora() {
     const adminSel = document.getElementById('admin-fich-user');
     if (adminSel) {
         adminSel.innerHTML = '<option value="">— Seleccionar —</option>';
-        usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado').forEach(u => {
+        usuarios.filter(u => u.rol === 'operario' || u.rol === 'encargado').sort((a, b) => a.nombre.localeCompare(b.nombre)).forEach(u => {
             const o = document.createElement('option');
             o.value = u.local_id; o.textContent = u.local_id + ' - ' + u.nombre;
             adminSel.appendChild(o);
@@ -3840,7 +3872,7 @@ async function renderAdminHistorial() {
 
     tbody.innerHTML = page.map(fich => {
         const u = userMap[fich.userId] || { id: fich.userId, nombre: fich.nombreUsuario || '?', rol: 'operario' };
-        const ui = userMap[fich.local_id] || {idFich: fich.local_id || '?', usuarioId: fich.userId || '?'};
+        const ui = userMap[fich.local_id] || { idFich: fich.local_id || '?', usuarioId: fich.userId || '?' };
         const r = ROLES[u.rol] || ROLES.operario;
         const tipo = fich.tipo === 'entrada'
             ? '<span class="fich-in">↑ ENTRADA</span>'
@@ -3866,7 +3898,7 @@ async function renderAdminHistorial() {
             ? `${fich.nota || ''} ${fich.creadoPor ? '· por ' + fich.creadoPor : ''}`.trim()
             : '—';
 
-        return `<tr>
+        return `<tr> 
         <td>            
             <span style="font-size:11px;color:var(--text3);max-width:120px;
             overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${ui.idFich}
@@ -4008,7 +4040,7 @@ async function renderAdminJornadas() {
     f.forEach(fich => {
         const dia = fich.fecha.substring(0, 10);
         const key = `${fich.userId}-${dia}`;
-        if (!jornadas[key]) jornadas[key] = {nombre:fich.nombreUsuario,rol:fich.rolUsuario, userId: fich.userId, dia, entradas: [], salidas: [] };
+        if (!jornadas[key]) jornadas[key] = { nombre: fich.nombreUsuario, rol: fich.rolUsuario, userId: fich.userId, dia, entradas: [], salidas: [] };
         if (fich.tipo === 'entrada') jornadas[key].entradas.push(fich.fecha);
         else jornadas[key].salidas.push(fich.fecha);
     });
